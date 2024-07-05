@@ -3,7 +3,7 @@ use wast::parser;
 use wast::parser::ParseBuffer;
 use wast::Wat;
 
-const REGEX_STR: &str = r"(?m)^\s*loop"; // ^\s*loop
+const REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)"; // ^\s*loop
 
 pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
     let mut output = wat.clone();
@@ -21,6 +21,6 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
         counter_num += 1;
     }
     let buf = ParseBuffer::new(&output)?;
-    let module = parser::parse::<Wat>(&buf)?;
+    let _module = parser::parse::<Wat>(&buf)?;
     Ok(output)
 }

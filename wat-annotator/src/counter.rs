@@ -9,7 +9,7 @@ const REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)"; // ^\s*loop
 const MODULE_NAME: &str = "counter-warm-code-cov";
 const PAGE_SIZE: usize = 64 * (2 << 10); // 64 KB
 const BUFFER_NAME: &str = "counter-buffer";
-const BUFFER_SIZE_NAME: &str = "size";
+const NUM_COUNTERS_NAME: &str = "num-counters";
 const INC_FUNC_NAME: &str = "increment-counter";
 const GET_FUNC_NAME: &str = "get-counter";
 
@@ -32,9 +32,9 @@ pub fn create_counter_module(num_counters: usize) -> String {
     code.push('\n');
     // store static size of buffer
     code.push_str(" (global $");
-    code.push_str(BUFFER_SIZE_NAME);
+    code.push_str(NUM_COUNTERS_NAME);
     code.push_str(" i64 ");
-    code.push_str(format!("(i64.const {}))", buffer_size).as_str());
+    code.push_str(format!("(i64.const {}))", num_counters).as_str());
     code.push('\n');
     // define function for incrementing counter
     code.push_str(" (func $");
@@ -49,6 +49,8 @@ pub fn create_counter_module(num_counters: usize) -> String {
     // export functions
     code.push_str(format!(" (export \"{0}\" (func ${0}))\n", INC_FUNC_NAME).as_str());
     code.push_str(format!(" (export \"{0}\" (func ${0}))\n", GET_FUNC_NAME).as_str());
+    // export size
+    code.push_str(format!(" (export \"{0}\" (global ${0}))", NUM_COUNTERS_NAME).as_str());
     // end module
     code.push_str(")\n");
     code

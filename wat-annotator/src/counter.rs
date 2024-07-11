@@ -1,11 +1,14 @@
+use core::panic;
 use std::mem;
 
 use regex::Regex;
+use wasmparser::{Chunk, Parser, Payload};
 use wast::parser;
 use wast::parser::ParseBuffer;
 use wast::Wat;
 
-const REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)"; // ^\s*loop
+const COUNTER_REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)";
+const MODULE_REGEX_STR: &str = r"\(core module";
 const MODULE_NAME: &str = "counter-warm-code-cov";
 const PAGE_SIZE: usize = 64 * (2 << 10); // 64 KB
 const BUFFER_NAME: &str = "counter-buffer";
@@ -60,8 +63,8 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
     let mut output = wat.clone();
 
     // find all matches
-    let re = Regex::new(REGEX_STR).unwrap();
-    let matches = re.find_iter(&wat);
+    let counter_re = Regex::new(COUNTER_REGEX_STR).unwrap();
+    let matches = counter_re.find_iter(&wat);
     // insert comments
     let mut offset = 0;
     let mut counter_num = 0;
@@ -71,16 +74,28 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
         offset += msg.as_bytes().len();
         counter_num += 1;
     }
+    // parse file to skip modules
+    let mut parser = Parser::new(0);
+    let mut parse_iter = parser.parse_all(output.as_bytes());
+    let component_parser;
+    while let Some(Ok(payload)) = parse_iter.next() {
+        if let Payload::ComponentSection { parser, .. } = payload {
+            component_parser = parser;
+            break;
+        }
+    }
+    // parse modules
+    
+
     // Insert counter module at the end
     let counter_module = create_counter_module(counter_num);
-    output.truncate(output.len() - 2); // get rid of last paren
-    //return Ok(output);
     // indent over all lines
     for line in counter_module.split('\n') {
-        output.push_str(format!("   {}\n", line).as_str());
+        let line = format!("    {line}\n");
+        output.insert_str(offset, &line);
+        offset += line.len();
     }
-    output.push_str(")\n");
-
+    
     let buf = ParseBuffer::new(&output)?;
     let _module = parser::parse::<Wat>(&buf)?;
     Ok(output)

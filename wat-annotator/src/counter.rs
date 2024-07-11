@@ -85,7 +85,7 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
         }
     }
     // parse modules
-    
+    component_parser.
 
     // Insert counter module at the end
     let counter_module = create_counter_module(counter_num);

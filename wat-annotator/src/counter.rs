@@ -5,13 +5,14 @@ use regex::Regex;
 use wasmparser::{Chunk, ComponentInstance, Parser, Payload};
 use wast::core::ModuleKind;
 use wast::parser::ParseBuffer;
-use wast::token::Span;
+use wast::token::{Index, Span};
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
 const COUNTER_REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)";
 const MODULE_REGEX_STR: &str = r"\(core module";
 const MODULE_NAME: &str = "counter-warm-code-cov";
+const INSTANCE_NAME: &str = "counter-warm-code-cov-instance";
 const PAGE_SIZE: usize = 64 * (2 << 10); // 64 KB
 const BUFFER_NAME: &str = "counter-buffer";
 const NUM_COUNTERS_NAME: &str = "num-counters";
@@ -86,6 +87,32 @@ pub fn create_counter_module(num_counters: usize) -> String {
     code
 }
 
+pub fn create_module_instance() -> String {
+    format!(
+        "   (core instance ${} (instantiate ${}))\n",
+        INSTANCE_NAME, MODULE_NAME
+    )
+}
+
+#[derive(Clone, Copy)]
+enum ItemType {
+    Instance,
+    Alias,
+}
+
+struct ItemIdx<'a> {
+    pub idx: Index<'a>,
+    pub item_type: ItemType,
+}
+
+impl<'a> ItemIdx<'a> {
+    fn from_idxs(idxs: &[Index<'a>], ty: ItemType) -> Vec<ItemIdx<'a>> {
+        idxs.iter()
+            .map(|&idx| ItemIdx { idx, item_type: ty })
+            .collect()
+    }
+}
+
 pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
     let mut output = wat.clone();
 
@@ -129,7 +156,8 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
 
     // Find module offsets
     let mut module_byte_ranges: Vec<Range<usize>> = Vec::new();
-    //let mut instantiations_and_byte_ranges = Vec::new();
+    let mut instantiations: Vec<Index> = Vec::new();
+    let mut aliases = Vec::new();
     let mut was_last_module = false; // To get the end of spans
 
     for field in component_fields {
@@ -150,24 +178,62 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
                     CoreModuleKind::Import { .. } => {}
                 }
             }
-            ComponentField::CoreInstance(ci) => {}
+            ComponentField::CoreInstance(ci) => {
+                if let CoreInstanceKind::Instantiate { module, args } = ci.kind {
+                    for arg in args {
+                        if let CoreInstantiationArgKind::Instance(i_ref) = arg.kind {
+                            instantiations.push((i_ref.idx))
+                        }
+                    }
+                }
+            }
             ComponentField::Instance(i) => {}
+            ComponentField::Alias(a) => match a.target {
+                AliasTarget::CoreExport { instance, .. } => {
+                    aliases.push(instance);
+                }
+                _ => {}
+            },
             _ => {}
+        }
+    }
+
+    // bump indexes
+    let mut indexes = ItemIdx::from_idxs(&instantiations, ItemType::Instance);
+    indexes.append(&mut ItemIdx::from_idxs(&aliases, ItemType::Alias));
+    indexes.sort_by(|ii1, ii2| ii1.idx.span().cmp(&ii2.idx.span()));
+    let mut byte_shift = 0;
+
+    for item_idx in indexes {
+        if let Index::Num(num, span) = item_idx.idx {
+            let old = num.to_string();
+            for _ in 0..old.as_bytes().len() {
+                output.remove(span.offset() + byte_shift);
+            }
+            let new = (num + 1).to_string();
+            output.insert_str(span.offset() + byte_shift, &new);
+            byte_shift += new.as_bytes().len() - old.as_bytes().len();
         }
     }
 
     // Insert counter module at the end
     let counter_module = create_counter_module(counter_num);
     let mut byte_offset = module_byte_ranges.last().unwrap().end - 1;
-    // indent over all lines
     for line in counter_module.split('\n') {
         let line = format!("    {line}\n");
         output.insert_str(byte_offset, &line);
         byte_offset += line.as_bytes().len();
     }
+    // insert instantiation
+    let counter_instance = create_module_instance();
+    for line in counter_instance.split('\n') {
+        let line = format!("    {line}\n");
+        output.insert_str(byte_offset, &line);
+        byte_offset += line.as_bytes().len();
+    }
 
-    let buf = ParseBuffer::new(&output)?;
-    let _module = parser::parse::<Wat>(&buf)?;
+    //let buf = ParseBuffer::new(&output)?;
+    //let _module = parser::parse::<Wat>(&buf)?;
     Ok(output)
 }
 

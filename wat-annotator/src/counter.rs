@@ -31,11 +31,11 @@ fn get_span(f: &ComponentField) -> Span {
         ComponentField::CanonicalFunc(cf) => cf.span,
         ComponentField::CoreFunc(cf) => cf.span,
         ComponentField::Func(f) => f.span,
-        ComponentField::Start(s) => Span::from_offset(0),
+        ComponentField::Start(_s) => Span::from_offset(0),
         ComponentField::Import(ci) => ci.span,
         ComponentField::Export(ce) => ce.span,
         ComponentField::Custom(c) => c.span,
-        ComponentField::Producers(p) => Span::from_offset(usize::max_value()),
+        ComponentField::Producers(_p) => Span::from_offset(usize::max_value()),
     }
 }
 
@@ -94,23 +94,30 @@ pub fn create_module_instance() -> String {
     )
 }
 
+pub fn create_import_statements() -> String {
+    let mut code = String::new();
+    code.push_str(
+        format!(
+            " (import \"{}\" \"{1}\" (func ${1} (param i32)))\n",
+            MODULE_NAME, INC_FUNC_NAME
+        )
+        .as_str(),
+    );
+    code.push_str(
+        format!(
+            " (import \"{}\" \"{1}\" (func ${1} (param i32) (result i64)))\n",
+            MODULE_NAME, GET_FUNC_NAME
+        )
+        .as_str(),
+    );
+    code
+}
+
 #[derive(Clone, Copy)]
-enum ItemType {
-    Instance,
-    Alias,
-}
-
-struct ItemIdx<'a> {
-    pub idx: Index<'a>,
-    pub item_type: ItemType,
-}
-
-impl<'a> ItemIdx<'a> {
-    fn from_idxs(idxs: &[Index<'a>], ty: ItemType) -> Vec<ItemIdx<'a>> {
-        idxs.iter()
-            .map(|&idx| ItemIdx { idx, item_type: ty })
-            .collect()
-    }
+enum ItemType<'a> {
+    InstanceIndex(Index<'a>),
+    Alias(Index<'a>),
+    InstanceSpan(Span),
 }
 
 pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
@@ -180,6 +187,7 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
             }
             ComponentField::CoreInstance(ci) => {
                 if let CoreInstanceKind::Instantiate { module, args } = ci.kind {
+                    ci.span
                     for arg in args {
                         if let CoreInstantiationArgKind::Instance(i_ref) = arg.kind {
                             instantiations.push((i_ref.idx))
@@ -187,7 +195,7 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
                     }
                 }
             }
-            ComponentField::Instance(i) => {}
+            ComponentField::Instance(_i) => {}
             ComponentField::Alias(a) => match a.target {
                 AliasTarget::CoreExport { instance, .. } => {
                     aliases.push(instance);
@@ -216,9 +224,23 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
         }
     }
 
+    // insert module import statement
+    let mut module_offset = 0;
+    for range in &module_byte_ranges {
+        // find where the next line starts
+        let next_line =
+            output[range.start + module_offset..].find('\n').unwrap() + "\n".as_bytes().len();
+        let import_stmt = create_import_statements();
+        for line in import_stmt.split('\n') {
+            let line = format!("    {line}\n");
+            output.insert_str(range.start + module_offset + next_line, &line);
+            module_offset += line.as_bytes().len();
+        }
+    }
+
     // Insert counter module at the end
     let counter_module = create_counter_module(counter_num);
-    let mut byte_offset = module_byte_ranges.last().unwrap().end - 1;
+    let mut byte_offset = module_byte_ranges.last().unwrap().end - 1 + module_offset;
     for line in counter_module.split('\n') {
         let line = format!("    {line}\n");
         output.insert_str(byte_offset, &line);

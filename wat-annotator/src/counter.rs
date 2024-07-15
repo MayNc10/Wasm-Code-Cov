@@ -1,11 +1,13 @@
-use core::panic;
 use std::mem;
+use std::ops::Range;
 
 use regex::Regex;
-use wasmparser::{Chunk, Parser, Payload};
-use wast::parser;
+use wasmparser::{Chunk, ComponentInstance, Parser, Payload};
+use wast::core::ModuleKind;
 use wast::parser::ParseBuffer;
-use wast::Wat;
+use wast::token::Span;
+use wast::{component::*, Wat};
+use wast::{parser, Error};
 
 const COUNTER_REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)";
 const MODULE_REGEX_STR: &str = r"\(core module";
@@ -15,6 +17,26 @@ const BUFFER_NAME: &str = "counter-buffer";
 const NUM_COUNTERS_NAME: &str = "num-counters";
 const INC_FUNC_NAME: &str = "increment-counter";
 const GET_FUNC_NAME: &str = "get-counter";
+
+fn get_span(f: &ComponentField) -> Span {
+    match f {
+        ComponentField::CoreModule(cm) => cm.span,
+        ComponentField::CoreInstance(ci) => ci.span,
+        ComponentField::CoreType(ct) => ct.span,
+        ComponentField::Component(nc) => nc.span,
+        ComponentField::Instance(i) => i.span,
+        ComponentField::Alias(a) => a.span,
+        ComponentField::Type(t) => t.span,
+        ComponentField::CanonicalFunc(cf) => cf.span,
+        ComponentField::CoreFunc(cf) => cf.span,
+        ComponentField::Func(f) => f.span,
+        ComponentField::Start(s) => Span::from_offset(0),
+        ComponentField::Import(ci) => ci.span,
+        ComponentField::Export(ce) => ce.span,
+        ComponentField::Custom(c) => c.span,
+        ComponentField::Producers(p) => Span::from_offset(usize::max_value()),
+    }
+}
 
 // pulling this out to make it clearer
 // using tabs for now, maybe switch asp
@@ -47,7 +69,12 @@ pub fn create_counter_module(num_counters: usize) -> String {
     // define function for getting index
     code.push_str(" (func $");
     code.push_str(GET_FUNC_NAME);
-    code.push_str(format!(" (param $idx i32) (result i64) local.get $idx i32.const {size_of} i32.mul i64.load)").as_str());
+    code.push_str(
+        format!(
+            " (param $idx i32) (result i64) local.get $idx i32.const {size_of} i32.mul i64.load)"
+        )
+        .as_str(),
+    );
     code.push('\n');
     // export functions
     code.push_str(format!(" (export \"{0}\" (func ${0}))\n", INC_FUNC_NAME).as_str());
@@ -66,37 +93,114 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
     let counter_re = Regex::new(COUNTER_REGEX_STR).unwrap();
     let matches = counter_re.find_iter(&wat);
     // insert comments
-    let mut offset = 0;
     let mut counter_num = 0;
-    for m in matches {
-        let msg = format!(";; inc counter #{}\n", counter_num);
-        output.insert_str(m.start() + offset, &msg);
-        offset += msg.as_bytes().len();
-        counter_num += 1;
-    }
-    // parse file to skip modules
-    let mut parser = Parser::new(0);
-    let mut parse_iter = parser.parse_all(output.as_bytes());
-    let component_parser;
-    while let Some(Ok(payload)) = parse_iter.next() {
-        if let Payload::ComponentSection { parser, .. } = payload {
-            component_parser = parser;
-            break;
+    {
+        let mut offset = 0;
+        for m in matches {
+            let msg = format!(";; inc counter #{}\n", counter_num);
+            output.insert_str(m.start() + offset, &msg);
+            offset += msg.as_bytes().len();
+            counter_num += 1;
         }
     }
-    // parse modules
-    component_parser.
+
+    // use wast to find modules
+    let output_2 = output.clone();
+    let buf = ParseBuffer::new(&output_2).unwrap();
+    let wat = parser::parse::<Wat>(&buf)?;
+    let component = match wat {
+        Wat::Component(c) => c,
+        Wat::Module(_) => {
+            return parser::Result::Err(Error::new(
+                Span::from_offset(0),
+                "Expected a component, got a module".to_string(),
+            ))
+        }
+    };
+    let component_fields = match component.kind {
+        ComponentKind::Text(v) => v,
+        ComponentKind::Binary(_) => {
+            return parser::Result::Err(Error::new(
+                Span::from_offset(0),
+                "Component was in binary form".to_string(),
+            ))
+        }
+    };
+
+    // Find module offsets
+    let mut module_byte_ranges: Vec<Range<usize>> = Vec::new();
+    //let mut instantiations_and_byte_ranges = Vec::new();
+    let mut was_last_module = false; // To get the end of spans
+
+    for field in component_fields {
+        if was_last_module {
+            let span = get_span(&field);
+            let start = module_byte_ranges.last().unwrap().start;
+            *module_byte_ranges.last_mut().unwrap() = start..span.offset();
+            was_last_module = false;
+        }
+        match field {
+            ComponentField::CoreModule(m) => {
+                // I don't think we want core module imports for now
+                match m.kind {
+                    CoreModuleKind::Inline { .. } => {
+                        module_byte_ranges.push(m.span.offset()..(m.span.offset() + 1));
+                        was_last_module = true;
+                    }
+                    CoreModuleKind::Import { .. } => {}
+                }
+            }
+            ComponentField::CoreInstance(ci) => {}
+            ComponentField::Instance(i) => {}
+            _ => {}
+        }
+    }
 
     // Insert counter module at the end
     let counter_module = create_counter_module(counter_num);
+    let mut byte_offset = module_byte_ranges.last().unwrap().end - 1;
     // indent over all lines
     for line in counter_module.split('\n') {
         let line = format!("    {line}\n");
-        output.insert_str(offset, &line);
-        offset += line.len();
+        output.insert_str(byte_offset, &line);
+        byte_offset += line.as_bytes().len();
     }
-    
+
     let buf = ParseBuffer::new(&output)?;
     let _module = parser::parse::<Wat>(&buf)?;
     Ok(output)
 }
+
+// code that doesn't work
+/*
+// parse file to skip modules
+    let parser = Parser::new(0);
+    let mut parse_iter = parser.parse_all(output.as_bytes());
+    // parse modules
+    let mut module_byte_ranges = Vec::new();
+    let mut instantiations_and_byte_ranges = Vec::new();
+    while let Some(Ok(payload)) = parse_iter.next() {
+        match payload {
+            Payload::ModuleSection {
+                parser: _,
+                unchecked_range,
+            } => {
+                module_byte_ranges.push(unchecked_range);
+            }
+            Payload::ComponentInstanceSection(r) => {
+                let mut iter = r.into_iter_with_offsets();
+                while let Some(Ok((offset, instantiation))) = iter.next() {
+                    if let ComponentInstance::Instantiate { .. } = instantiation {
+                        instantiations_and_byte_ranges.push((offset, instantiation));
+                    }
+                }
+            }
+            _ => {
+                panic!("hi");
+                println!("Payload: {:?}", payload);
+            }
+        }
+    }
+    drop(parse_iter);
+
+*/

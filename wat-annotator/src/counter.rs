@@ -166,6 +166,7 @@ impl<'a> ItemType<'a> {
 pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
     let mut output = wat.clone();
 
+    // TODO: Rewrite this using the wast system instead of regexes
     // find all matches
     let counter_re = Regex::new(COUNTER_REGEX_STR).unwrap();
     let matches = counter_re.find_iter(&wat);
@@ -174,7 +175,7 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
     {
         let mut offset = 0;
         for m in matches {
-            let msg = format!(";; inc counter #{}\n", counter_num);
+            let msg = format!("i32.const {} call ${}\n", counter_num, INC_FUNC_NAME); //format!(";; inc counter #{}\n", counter_num);
             output.insert_str(m.start() + offset, &msg);
             offset += msg.as_bytes().len();
             counter_num += 1;

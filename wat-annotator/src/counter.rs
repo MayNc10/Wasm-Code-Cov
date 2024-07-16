@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use regex::Regex;
 use wasmparser::{Chunk, ComponentInstance, Parser, Payload};
-use wast::core::ModuleKind;
+use wast::core::{ModuleField, ModuleKind};
 use wast::parser::ParseBuffer;
 use wast::token::{Index, Span};
 use wast::{component::*, Wat};
@@ -11,6 +11,7 @@ use wast::{parser, Error};
 
 const COUNTER_REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)";
 const MODULE_REGEX_STR: &str = r"\(core module";
+const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
 const MODULE_NAME: &str = "counter-warm-code-cov";
 const INSTANCE_NAME: &str = "counter-warm-code-cov-instance";
 const PAGE_SIZE: usize = 64 * (2 << 10); // 64 KB
@@ -19,6 +20,7 @@ const NUM_COUNTERS_NAME: &str = "num-counters";
 const INC_FUNC_NAME: &str = "increment-counter";
 const GET_FUNC_NAME: &str = "get-counter";
 
+/// FIXME: This should be failiable instead of lying for start and producers
 fn get_span(f: &ComponentField) -> Span {
     match f {
         ComponentField::CoreModule(cm) => cm.span,
@@ -36,6 +38,24 @@ fn get_span(f: &ComponentField) -> Span {
         ComponentField::Export(ce) => ce.span,
         ComponentField::Custom(c) => c.span,
         ComponentField::Producers(_p) => Span::from_offset(usize::max_value()),
+    }
+}
+
+fn get_module_span(f: &ModuleField) -> Option<Span> {
+    match f {
+        ModuleField::Type(f) => Some(f.span),
+        ModuleField::Rec(f) => Some(f.span),
+        ModuleField::Import(f) => Some(f.span),
+        ModuleField::Func(f) => Some(f.span),
+        ModuleField::Table(f) => Some(f.span),
+        ModuleField::Memory(f) => Some(f.span),
+        ModuleField::Global(f) => Some(f.span),
+        ModuleField::Export(f) => Some(f.span),
+        ModuleField::Start(f) => None,
+        ModuleField::Elem(f) => Some(f.span),
+        ModuleField::Data(f) => Some(f.span),
+        ModuleField::Tag(f) => Some(f.span),
+        ModuleField::Custom(f) => None,
     }
 }
 
@@ -94,6 +114,13 @@ pub fn create_module_instance() -> String {
     )
 }
 
+pub fn create_instance_import() -> String {
+    format!(
+        "   (with \"{}\" (instance ${}))\n",
+        MODULE_NAME, INSTANCE_NAME
+    )
+}
+
 pub fn create_import_statements() -> String {
     let mut code = String::new();
     code.push_str(
@@ -118,6 +145,22 @@ enum ItemType<'a> {
     InstanceIndex(Index<'a>),
     Alias(Index<'a>),
     InstanceSpan(Span),
+}
+
+impl<'a> ItemType<'a> {
+    fn span(&self) -> Span {
+        match self {
+            Self::Alias(idx) | Self::InstanceIndex(idx) => idx.span(),
+            Self::InstanceSpan(span) => *span,
+        }
+    }
+    /// Some enum variants don't have an index, in which case they return None
+    fn get_idx_if_avaliable(&self) -> Option<Index> {
+        match self {
+            Self::Alias(idx) | Self::InstanceIndex(idx) => Some(*idx),
+            Self::InstanceSpan(_) => None,
+        }
+    }
 }
 
 pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
@@ -163,8 +206,10 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
 
     // Find module offsets
     let mut module_byte_ranges: Vec<Range<usize>> = Vec::new();
-    let mut instantiations: Vec<Index> = Vec::new();
+    let mut last_import_byte_ranges = Vec::new();
+    let mut instantiation_idxs: Vec<Index> = Vec::new();
     let mut aliases = Vec::new();
+    let mut instatiation_ranges = Vec::new();
     let mut was_last_module = false; // To get the end of spans
 
     for field in component_fields {
@@ -174,28 +219,48 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
             *module_byte_ranges.last_mut().unwrap() = start..span.offset();
             was_last_module = false;
         }
+
         match field {
             ComponentField::CoreModule(m) => {
                 // I don't think we want core module imports for now
                 match m.kind {
-                    CoreModuleKind::Inline { .. } => {
+                    CoreModuleKind::Inline {
+                        fields: module_fields,
+                    } => {
                         module_byte_ranges.push(m.span.offset()..(m.span.offset() + 1));
                         was_last_module = true;
+                        let mut last_import: Option<Span> = None;
+
+                        for field in module_fields {
+                            // Fix this to check for func or end of module
+                            if last_import.is_some()
+                                && !matches!(field, ModuleField::Import(..))
+                                && get_module_span(&field).is_some()
+                            {
+                                let start = last_import.unwrap().offset();
+                                last_import_byte_ranges
+                                    .push(start..get_module_span(&field).unwrap().offset());
+                                last_import = None;
+                            }
+
+                            if let ModuleField::Import(i) = field {
+                                last_import = Some(i.span);
+                            }
+                        }
                     }
                     CoreModuleKind::Import { .. } => {}
                 }
             }
             ComponentField::CoreInstance(ci) => {
                 if let CoreInstanceKind::Instantiate { module, args } = ci.kind {
-                    ci.span
+                    instatiation_ranges.push(ci.span);
                     for arg in args {
                         if let CoreInstantiationArgKind::Instance(i_ref) = arg.kind {
-                            instantiations.push((i_ref.idx))
+                            instantiation_idxs.push(i_ref.idx)
                         }
                     }
                 }
             }
-            ComponentField::Instance(_i) => {}
             ComponentField::Alias(a) => match a.target {
                 AliasTarget::CoreExport { instance, .. } => {
                     aliases.push(instance);
@@ -207,13 +272,32 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
     }
 
     // bump indexes
-    let mut indexes = ItemIdx::from_idxs(&instantiations, ItemType::Instance);
-    indexes.append(&mut ItemIdx::from_idxs(&aliases, ItemType::Alias));
-    indexes.sort_by(|ii1, ii2| ii1.idx.span().cmp(&ii2.idx.span()));
+    let mut items: Vec<_> = instantiation_idxs
+        .into_iter()
+        .map(|idx| ItemType::InstanceIndex(idx))
+        .collect();
+    items.extend(aliases.iter().map(|&idx| ItemType::Alias(idx)));
+    items.extend(
+        instatiation_ranges
+            .iter()
+            .map(|&span| ItemType::InstanceSpan(span)),
+    );
+    items.sort_by(|ii1, ii2| ii1.span().cmp(&ii2.span()));
     let mut byte_shift = 0;
 
-    for item_idx in indexes {
-        if let Index::Num(num, span) = item_idx.idx {
+    let re_instance = Regex::new(INSTANTIATION_REGEX_STR).unwrap();
+
+    for item in items {
+        if let ItemType::InstanceSpan(s) = item {
+            // find where to offset
+            let m = re_instance
+                .find(std::str::from_utf8(&output.as_bytes()[s.offset() + byte_shift..]).unwrap())
+                .unwrap();
+
+            let msg = format!("\n{}", create_instance_import());
+            output.insert_str(s.offset() + byte_shift + m.end(), &msg);
+            byte_shift += msg.as_bytes().len();
+        } else if let Some(Index::Num(num, span)) = item.get_idx_if_avaliable() {
             let old = num.to_string();
             for _ in 0..old.as_bytes().len() {
                 output.remove(span.offset() + byte_shift);
@@ -221,10 +305,13 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
             let new = (num + 1).to_string();
             output.insert_str(span.offset() + byte_shift, &new);
             byte_shift += new.as_bytes().len() - old.as_bytes().len();
+        } else {
+            unreachable!()
         }
     }
 
     // insert module import statement
+    /*
     let mut module_offset = 0;
     for range in &module_byte_ranges {
         // find where the next line starts
@@ -237,10 +324,22 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
             module_offset += line.as_bytes().len();
         }
     }
+    */
+
+    // Insert import at the end of the import blocks
+    let mut import_offset = 0;
+    for range in &last_import_byte_ranges {
+        let import_stmt = create_import_statements();
+        for line in import_stmt.split('\n') {
+            let line = format!("    {line}\n");
+            output.insert_str(range.end - 1 + import_offset, &line);
+            import_offset += line.as_bytes().len();
+        }
+    }
 
     // Insert counter module at the end
     let counter_module = create_counter_module(counter_num);
-    let mut byte_offset = module_byte_ranges.last().unwrap().end - 1 + module_offset;
+    let mut byte_offset = module_byte_ranges.last().unwrap().end - 1 + import_offset;
     for line in counter_module.split('\n') {
         let line = format!("    {line}\n");
         output.insert_str(byte_offset, &line);

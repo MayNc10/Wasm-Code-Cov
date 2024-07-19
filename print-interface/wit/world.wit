@@ -1,0 +1,11 @@
+package component:print-interface;
+
+interface printer {
+        print: func(str: string);
+        println: func(str: string);
+    }
+
+/// An example world for the component to target.
+world my-world {
+    export printer;
+}

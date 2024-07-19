@@ -163,6 +163,104 @@ impl<'a> ItemType<'a> {
     }
 }
 
+pub fn find_func_idxs(wat: &Wat) -> Option<Vec<Span>> {
+    let comp = match wat {
+        Wat::Component(c) => c,
+        Wat::Module(_) => return None,
+    };
+
+    let component_fields = match &comp.kind {
+        ComponentKind::Text(f) => f,
+        ComponentKind::Binary(_) => return None,
+    };
+
+    let mut spans = Vec::new();
+
+    for field in component_fields {
+        match field {
+            ComponentField::Alias(_) => {}
+            ComponentField::CanonicalFunc(cf) => {
+                // A canonical function can be a lowering of a component function
+                // in which case, we need to get the span
+                if let CanonicalFuncKind::Lower(cl) = &cf.kind {
+                    // I think this span is the span where the idx is used, not where its defined
+                    if let Index::Num(_, span) = cl.func.idx {
+                        spans.push(span);
+                    }
+                }
+            }
+            ComponentField::Component(_) => {}
+            ComponentField::CoreFunc(cf) => {
+                // Even though this is a 'core func', its in the top level of the component, so i think it uses the function idxs there
+                if let CoreFuncKind::Lower(cl) = &cf.kind {
+                    // I think this span is the span where the idx is used, not where its defined
+                    if let Index::Num(_, span) = cl.func.idx {
+                        spans.push(span);
+                    }
+                }
+            }
+            ComponentField::CoreInstance(_) => {}
+            ComponentField::CoreModule(_) => {}
+            ComponentField::CoreType(_) => {}
+            ComponentField::Custom(_) => {}
+            ComponentField::Export(_) => {}
+            ComponentField::Func(_) => {}
+            ComponentField::Import(_) => {}
+            ComponentField::Instance(_) => {}
+            ComponentField::Producers(_) => {}
+            ComponentField::Start(s) => {
+                if let Index::Num(_, span) = s.func {
+                    spans.push(span);
+                }
+            }
+            ComponentField::Type(t) => {
+                if let TypeDef::Resource(r) = &t.def {
+                    if let Some(dtor) = &r.dtor {
+                        if let Index::Num(_, span) = dtor.idx {
+                            spans.push(span);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Some(spans)
+}
+
+pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
+    let mut output = wat.clone();
+
+    // TODO: Rewrite this using the wast system instead of regexes
+    // find all matches
+    let counter_re = Regex::new(COUNTER_REGEX_STR).unwrap();
+    let matches = counter_re.find_iter(&wat);
+    // insert comments
+    let mut counter_num = 0;
+    {
+        let mut offset = 0;
+        for m in matches {
+            let msg = format!(";; inc counter #{}\n", counter_num); //format!("i32.const {} call ${}\n", counter_num, INC_FUNC_NAME);
+            output.insert_str(m.start() + offset, &msg);
+            offset += msg.as_bytes().len();
+            counter_num += 1;
+        }
+    }
+
+    let buf = ParseBuffer::new(&output)?;
+    let component = parser::parse::<Wat>(&buf)?;
+    let spans = find_func_idxs(&component);
+    // mutate spans to increment the letter
+    let mut offset = 0;
+    for span in spans.unwrap() {
+        let msg = "\nhai :3\n";
+        output.insert_str(span.offset() + offset, msg);
+        offset += msg.as_bytes().len();
+    }
+
+    Ok(output)
+}
+/*
 pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
     let mut output = wat.clone();
 
@@ -358,37 +456,4 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
     //let _module = parser::parse::<Wat>(&buf)?;
     Ok(output)
 }
-
-// code that doesn't work
-/*
-// parse file to skip modules
-    let parser = Parser::new(0);
-    let mut parse_iter = parser.parse_all(output.as_bytes());
-    // parse modules
-    let mut module_byte_ranges = Vec::new();
-    let mut instantiations_and_byte_ranges = Vec::new();
-    while let Some(Ok(payload)) = parse_iter.next() {
-        match payload {
-            Payload::ModuleSection {
-                parser: _,
-                unchecked_range,
-            } => {
-                module_byte_ranges.push(unchecked_range);
-            }
-            Payload::ComponentInstanceSection(r) => {
-                let mut iter = r.into_iter_with_offsets();
-                while let Some(Ok((offset, instantiation))) = iter.next() {
-                    if let ComponentInstance::Instantiate { .. } = instantiation {
-                        instantiations_and_byte_ranges.push((offset, instantiation));
-                    }
-                }
-            }
-            _ => {
-                panic!("hi");
-                println!("Payload: {:?}", payload);
-            }
-        }
-    }
-    drop(parse_iter);
-
-*/
+ */

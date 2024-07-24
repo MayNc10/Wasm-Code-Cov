@@ -4,7 +4,7 @@ use std::ops::Range;
 use regex::Regex;
 use wasmparser::{Chunk, ComponentInstance, Parser, Payload};
 use wast::core::{ModuleField, ModuleKind};
-use wast::parser::ParseBuffer;
+use wast::parser::{parse, ParseBuffer};
 use wast::token::{Index, Span};
 use wast::{component::*, Wat};
 use wast::{parser, Error};
@@ -12,6 +12,8 @@ use wast::{parser, Error};
 const COUNTER_REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)";
 const MODULE_REGEX_STR: &str = r"\(core module";
 const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
+const INDEXNUM_REGEX_STR: &str = r"\(;(?P<idx>[0-9]+);\)";
+const INDEXNUM_REPLACE_REGEX_STR: &str = r"$$$idx";
 const MODULE_NAME: &str = "counter-warm-code-cov";
 const INSTANCE_NAME: &str = "counter-warm-code-cov-instance";
 const PAGE_SIZE: usize = 64 * (2 << 10); // 64 KB
@@ -163,7 +165,7 @@ impl<'a> ItemType<'a> {
     }
 }
 
-pub fn find_func_idxs(wat: &Wat) -> Option<Vec<Span>> {
+pub fn find_idxs<'a>(wat: &'a Wat) -> Option<Vec<Index<'a>>> {
     let comp = match wat {
         Wat::Component(c) => c,
         Wat::Module(_) => return None,
@@ -174,58 +176,127 @@ pub fn find_func_idxs(wat: &Wat) -> Option<Vec<Span>> {
         ComponentKind::Binary(_) => return None,
     };
 
-    let mut spans = Vec::new();
+    let mut idxs = Vec::new();
 
     for field in component_fields {
         match field {
-            ComponentField::Alias(_) => {}
+            ComponentField::Alias(_) => {
+                //eprintln!("Hit alias");
+            }
             ComponentField::CanonicalFunc(cf) => {
+                //eprintln!("Hit cf");
                 // A canonical function can be a lowering of a component function
                 // in which case, we need to get the span
-                if let CanonicalFuncKind::Lower(cl) = &cf.kind {
-                    // I think this span is the span where the idx is used, not where its defined
-                    if let Index::Num(_, span) = cl.func.idx {
-                        spans.push(span);
+                match &cf.kind {
+                    CanonicalFuncKind::Lower(cl) => {
+                        // I think this span is the span where the idx is used, not where its defined
+                        if let Index::Num(..) = cl.func.idx {
+                            idxs.push(cl.func.idx);
+                        }
                     }
+                    _ => {}
                 }
             }
-            ComponentField::Component(_) => {}
+            ComponentField::Component(_) => {
+                //eprintln!("Hit component");
+            }
             ComponentField::CoreFunc(cf) => {
+                //eprintln!("Hit core func");
                 // Even though this is a 'core func', its in the top level of the component, so i think it uses the function idxs there
                 if let CoreFuncKind::Lower(cl) = &cf.kind {
                     // I think this span is the span where the idx is used, not where its defined
-                    if let Index::Num(_, span) = cl.func.idx {
-                        spans.push(span);
+                    if let Index::Num(..) = cl.func.idx {
+                        idxs.push(cl.func.idx);
+                    }
+                }
+                if let CoreFuncKind::ResourceDrop(rd) = &cf.kind {
+                    if let Index::Num(..) = rd.ty {
+                        idxs.push(rd.ty);
                     }
                 }
             }
-            ComponentField::CoreInstance(_) => {}
-            ComponentField::CoreModule(_) => {}
-            ComponentField::CoreType(_) => {}
-            ComponentField::Custom(_) => {}
-            ComponentField::Export(_) => {}
-            ComponentField::Func(_) => {}
-            ComponentField::Import(_) => {}
-            ComponentField::Instance(_) => {}
-            ComponentField::Producers(_) => {}
+            ComponentField::CoreInstance(_) => {
+                //eprintln!("Hit core instance");
+            }
+            ComponentField::CoreModule(_) => {
+                //eprintln!("Hit core module");
+            }
+            ComponentField::CoreType(_) => {
+                //eprintln!("Hit core type");
+            }
+            ComponentField::Custom(_) => {
+                //eprintln!("Hit custom");
+            }
+            ComponentField::Export(_) => {
+                //eprintln!("Hit export");
+            }
+            ComponentField::Func(_) => {
+                //eprintln!("Hit func");
+            }
+            ComponentField::Import(_) => {
+                //eprintln!("Hit import");
+            }
+            ComponentField::Instance(_) => {
+                //eprintln!("Hit instance");
+            }
+            ComponentField::Producers(_) => {
+                //eprintln!("Hit producers");
+            }
             ComponentField::Start(s) => {
-                if let Index::Num(_, span) = s.func {
-                    spans.push(span);
+                //eprintln!("Hit start");
+                if let Index::Num(..) = s.func {
+                    idxs.push(s.func);
                 }
             }
             ComponentField::Type(t) => {
+                //eprintln!("Hit type");
                 if let TypeDef::Resource(r) = &t.def {
                     if let Some(dtor) = &r.dtor {
-                        if let Index::Num(_, span) = dtor.idx {
-                            spans.push(span);
+                        if let Index::Num(..) = dtor.idx {
+                            idxs.push(dtor.idx);
                         }
                     }
                 }
             }
         }
     }
+    //panic!("erm ... what the bug");
 
-    Some(spans)
+    Some(idxs)
+}
+
+pub fn increment_idx(
+    output: &mut String,
+    idx: Index,
+    byte_shift: usize,
+    lower_bound: Option<u32>,
+) -> usize {
+    match idx {
+        Index::Num(num, span) => {
+            if num >= lower_bound.unwrap_or(0) {
+                let old = num.to_string();
+                for _ in 0..old.as_bytes().len() {
+                    output.remove(span.offset() + byte_shift);
+                }
+                let new = (num + 1).to_string();
+                output.insert_str(span.offset() + byte_shift, &new);
+                byte_shift + new.as_bytes().len() - old.as_bytes().len()
+            } else {
+                0
+            }
+        }
+        Index::Id(_) => 0,
+    }
+}
+
+pub fn get_fields<'a>(comp: &'a Wat) -> Option<&'a Vec<ComponentField<'a>>> {
+    match comp {
+        Wat::Module(_) => None,
+        Wat::Component(comp) => match &comp.kind {
+            ComponentKind::Binary(_) => None,
+            ComponentKind::Text(v) => Some(v),
+        },
+    }
 }
 
 pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
@@ -246,18 +317,36 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
             counter_num += 1;
         }
     }
-
-    let buf = ParseBuffer::new(&output)?;
+    let output_dup = output.clone();
+    let buf = ParseBuffer::new(&output_dup)?;
     let component = parser::parse::<Wat>(&buf)?;
-    let spans = find_func_idxs(&component);
-    // mutate spans to increment the letter
-    let mut offset = 0;
-    for span in spans.unwrap() {
-        let msg = "\nhai :3\n";
-        output.insert_str(span.offset() + offset, msg);
-        offset += msg.as_bytes().len();
+    // Insert import statement
+    let mut last_import_span = None;
+    let mut last_range = 0..1;
+    let mut byte_shift = 0;
+    for field in get_fields(&component).unwrap() {
+        if let ComponentField::Import(i) = field {
+            last_import_span = Some(i);
+        } else if let ComponentField::Type(_) = field {
+        } else if let ComponentField::Alias(_) = field {
+        } else if last_import_span.is_some() {
+            last_range = last_import_span.unwrap().span.offset()..get_span(field).offset();
+            last_import_span = None;
+        } else if let ComponentField::CoreFunc(cf) = field {
+            if let CoreFuncKind::ResourceDrop(rd) = &cf.kind {
+                // todo: don't hardcode this lol
+                byte_shift += increment_idx(&mut output, rd.ty, byte_shift, Some(18));
+            }
+        }
     }
+    // insert test statement
+    output.insert_str(
+        last_range.end - 1,
+        "(import \"inc-counter\" (func $inc-count (param \"idx\" s32))) \n",
+    );
 
+    let buf = ParseBuffer::new(&output).unwrap();
+    let component = parser::parse::<Wat>(&buf).unwrap();
     Ok(output)
 }
 /*
@@ -396,14 +485,8 @@ pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {
             let msg = format!("\n{}", create_instance_import());
             output.insert_str(s.offset() + byte_shift + m.end(), &msg);
             byte_shift += msg.as_bytes().len();
-        } else if let Some(Index::Num(num, span)) = item.get_idx_if_avaliable() {
-            let old = num.to_string();
-            for _ in 0..old.as_bytes().len() {
-                output.remove(span.offset() + byte_shift);
-            }
-            let new = (num + 1).to_string();
-            output.insert_str(span.offset() + byte_shift, &new);
-            byte_shift += new.as_bytes().len() - old.as_bytes().len();
+        } else if let Some(idx) = item.get_idx_if_avaliable() {
+            byte_shift += increment_idx(&mut output, idx, byte_shift);
         } else {
             unreachable!()
         }

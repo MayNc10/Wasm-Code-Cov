@@ -12,6 +12,6 @@ Lower the imported function to a core function, and make an instance exporting t
    (export "inc-counter" (func $inc-counter))
   )`
 bump all instance idxs after making that instance (like in `alias core export idx ` statements)
-bump indexes in `(export "func" (func idx))` statements
+bump indexes in `(export "func" (func idx))` statements (in instantiations)
 bump function indexes in  `(realloc idx)` statements
 bump function indexes in `(canon lift (core func idx))` statements

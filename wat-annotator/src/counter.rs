@@ -4,11 +4,12 @@ use std::ops::Range;
 use regex::Regex;
 use wasmparser::{Chunk, ComponentInstance, Parser, Payload};
 use wast::core::{Instruction, ModuleField, ModuleKind};
-use wast::kw::exnref;
 use wast::parser::{parse, ParseBuffer};
 use wast::token::{Index, Span};
 use wast::{component::*, Wat};
 use wast::{parser, Error};
+
+use crate::offset_tracker::OffsetTracker;
 
 const COUNTER_REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)";
 const MODULE_REGEX_STR: &str = r"\(core module";
@@ -22,6 +23,7 @@ const BUFFER_NAME: &str = "counter-buffer";
 const NUM_COUNTERS_NAME: &str = "num-counters";
 const GET_FUNC_NAME: &str = "get-counter";
 const INC_FUNC_NAME: &str = "inc-counter";
+const INC_MODULE_NAME: &str = "inc-counter-module";
 /// FIXME: This should be failiable instead of lying for start and producers
 fn get_span(f: &ComponentField) -> Span {
     match f {
@@ -271,6 +273,7 @@ pub fn increment_idx(
     byte_shift: usize,
     lower_bound: Option<u32>,
 ) -> usize {
+    return byte_shift;
     match idx {
         Index::Num(num, span) => {
             if num >= lower_bound.unwrap_or(0) {
@@ -299,7 +302,7 @@ pub fn get_fields<'a>(comp: &'a Wat) -> Option<&'a Vec<ComponentField<'a>>> {
     }
 }
 
-pub fn add_scaffolding(mut wat: String) -> parser::Result<String> {
+pub fn add_scaffolding(wat: String) -> parser::Result<String> {
     // Things to do: (in order)
     // Add import statement for the inc counter function (in type and import section)
     // Add import statements within each module
@@ -309,21 +312,28 @@ pub fn add_scaffolding(mut wat: String) -> parser::Result<String> {
     // Bump the index of any core function
     // Add canon lower of inc counter func (right after module sections)
     // Add instance exporting that core function
-    wat = add_inc_import_section(wat)?;
-    wat = add_imports_in_module(wat)?;
-    wat = add_func_calls(wat)?;
-    wat = bump_instance_idxs(wat)?;
-    wat = bump_comp_func_idxs(wat)?;
-    wat = bump_core_func_idxs(wat)?;
-    wat = bump_type_idxs(wat)?;
-    wat = add_canon_lower_and_instance(wat)?;
-    Ok(wat)
+    let mut output = wat.clone();
+    let mut buf = ParseBuffer::new(&wat)?;
+    let buf = buf.track_instr_spans(true);
+    let wat = parse::<Wat>(buf)?;
+    let mut total_increment = OffsetTracker::new();
+
+    add_inc_import_section(&wat, &mut output, &mut total_increment)?;
+    add_imports_in_module(&wat, &mut output, &mut total_increment)?;
+    // add_func_calls(&wat, &mut output, &mut total_increment)?;
+    bump_instance_idxs(&wat, &mut output, &mut total_increment)?;
+    bump_comp_func_idxs(&wat, &mut output, &mut total_increment)?;
+    bump_core_func_idxs(&wat, &mut output, &mut total_increment)?;
+    bump_type_idxs(&wat, &mut output, &mut total_increment)?;
+    add_canon_lower_and_instance(&wat, &mut output, &mut total_increment)?;
+    Ok(output)
 }
 
-pub fn add_inc_import_section(wat: String) -> parser::Result<String> {
-    let mut output = wat.clone();
-    let buf = ParseBuffer::new(&wat)?;
-    let wat = parse::<Wat>(&buf)?;
+pub fn add_inc_import_section(
+    wat: &Wat,
+    output: &mut String,
+    total_increment: &mut OffsetTracker,
+) -> parser::Result<()> {
     let mut was_last_ty_import_alias = false;
     let mut offset = 0;
     'field: for field in get_fields(&wat).ok_or(Error::new(
@@ -336,7 +346,7 @@ pub fn add_inc_import_section(wat: String) -> parser::Result<String> {
             }
             _ => {
                 if was_last_ty_import_alias {
-                    offset = get_span(field).offset();
+                    offset = get_span(field).offset() - 1;
                     break 'field;
                 }
             }
@@ -347,17 +357,17 @@ pub fn add_inc_import_section(wat: String) -> parser::Result<String> {
         "(import \"{0}\" (func ${0} (param \"idx\" s32)))",
         INC_FUNC_NAME
     );
-    output.insert_str(offset, &msg);
+    total_increment.add_to_string(output, offset, &msg);
 
-    Ok(output)
+    Ok(())
 }
 
-pub fn add_imports_in_module(wat: String) -> parser::Result<String> {
-    let mut output = wat.clone();
-    let buf = ParseBuffer::new(&wat)?;
-    let wat = parse::<Wat>(&buf)?;
+pub fn add_imports_in_module(
+    wat: &Wat,
+    output: &mut String,
+    total_increment: &mut OffsetTracker,
+) -> parser::Result<()> {
     let mut offset = 0;
-    let mut total_increment = 0;
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -371,7 +381,7 @@ pub fn add_imports_in_module(wat: String) -> parser::Result<String> {
                         was_last_import = true
                     } else if was_last_import {
                         if let Some(span) = get_module_span(field) {
-                            offset = span.offset();
+                            offset = span.offset() - 1;
                             break 'module;
                         }
                     }
@@ -385,24 +395,23 @@ pub fn add_imports_in_module(wat: String) -> parser::Result<String> {
                 ));
             }
             let msg = format!(
-                "(import \"{0}\" (func ${0} (param \"idx\" i32)))",
-                INC_FUNC_NAME
+                "(import \"{0}\" \"{1}\" (func ${1} (param i32)))",
+                INC_MODULE_NAME, INC_FUNC_NAME
             );
-            output.insert_str(offset + total_increment, &msg);
-            total_increment += msg.as_bytes().len();
+
+            total_increment.add_to_string(output, offset, &msg);
         }
     }
 
-    Ok(output)
+    Ok(())
 }
 
 // todo actually add function calls lol
-pub fn add_func_calls(wat: String) -> parser::Result<String> {
-    let mut output = wat.clone();
-    let mut buf = ParseBuffer::new(&wat)?;
-    let buf = buf.track_instr_spans(true);
-    let wat = parse::<Wat>(buf)?;
-    let mut total_increment = 0;
+pub fn add_func_calls(
+    wat: &Wat,
+    output: &mut String,
+    total_increment: &mut OffsetTracker,
+) -> parser::Result<()> {
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -428,11 +437,11 @@ pub fn add_func_calls(wat: String) -> parser::Result<String> {
                                     | Instruction::Loop(_) => {
                                         // insert line here
                                         let msg = format!(";; hai :3");
-                                        output.insert_str(
-                                            spans[idx].offset() + total_increment,
+                                        total_increment.add_to_string(
+                                            output,
+                                            spans[idx].offset(),
                                             &msg,
                                         );
-                                        total_increment += msg.as_bytes().len();
                                     }
                                     _ => {}
                                 }
@@ -444,18 +453,18 @@ pub fn add_func_calls(wat: String) -> parser::Result<String> {
         }
     }
 
-    Ok(output)
+    Ok(())
 }
 
-pub fn bump_instance_idxs(wat: String) -> parser::Result<String> {
+pub fn bump_instance_idxs(
+    wat: &Wat,
+    output: &mut String,
+    total_increment: &mut OffsetTracker,
+) -> parser::Result<()> {
     // instance idxs are used in:
     // alias export statements
-    // intantiation args
+    // instantiation args
 
-    let mut output = wat.clone();
-    let mut buf = ParseBuffer::new(&wat)?;
-    let wat = parse::<Wat>(&buf)?;
-    let mut total_increment = 0;
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -465,7 +474,8 @@ pub fn bump_instance_idxs(wat: String) -> parser::Result<String> {
                 AliasTarget::Export { instance: idx, .. }
                 | AliasTarget::CoreExport { instance: idx, .. } => {
                     // TODO Figure out lower bound flexibly
-                    total_increment += increment_idx(&mut output, idx, total_increment, None);
+
+                    total_increment.increment_idx(output, idx, None);
                 }
                 _ => {}
             },
@@ -476,8 +486,7 @@ pub fn bump_instance_idxs(wat: String) -> parser::Result<String> {
                             // Other things here need to be bumped, but that happens in other functions
                             if let ComponentExportKind::Instance(i) = cek {
                                 // TODO Figure out lower bound flexibly
-                                total_increment +=
-                                    increment_idx(&mut output, i.idx, total_increment, None);
+                                total_increment.increment_idx(output, i.idx, None);
                             }
                         }
                     }
@@ -487,18 +496,107 @@ pub fn bump_instance_idxs(wat: String) -> parser::Result<String> {
         }
     }
 
-    Ok(output)
+    Ok(())
 }
 
-pub fn bump_comp_func_idxs(wat: String) -> parser::Result<String> {
-    todo!()
+pub fn bump_comp_func_idxs(
+    wat: &Wat,
+    output: &mut String,
+    total_increment: &mut OffsetTracker,
+) -> parser::Result<()> {
+    // What to bump
+    // canon lower <idx>
+    // (instantiate $instance (with "func" (func <idx>)))
+    // (instantiate $instance (export "func" (func <idx>)))
+
+    for field in get_fields(&wat).ok_or(Error::new(
+        wat.span(),
+        "Input WAT file could not be parsed (may be binary or module)".to_string(),
+    ))? {
+        match field {
+            ComponentField::CoreFunc(cf) => match &cf.kind {
+                CoreFuncKind::Lower(cl) => total_increment.increment_idx(output, cl.func.idx, None),
+                _ => {}
+            },
+            ComponentField::Instance(i) => match &i.kind {
+                InstanceKind::Instantiate { component: _, args } => {
+                    for arg in args {
+                        match &arg.kind {
+                            // I think this is the right match for an instance arg
+                            InstantiationArgKind::Item(item) => match item {
+                                ComponentExportKind::Func(cf) => {
+                                    total_increment.increment_idx(output, cf.idx, None);
+                                }
+                                _ => {}
+                            },
+                            InstantiationArgKind::BundleOfExports(_, exports) => {
+                                for export in exports {
+                                    match &export.kind {
+                                        ComponentExportKind::Func(cf) => {
+                                            total_increment.increment_idx(output, cf.idx, None);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    Ok(())
 }
 
-pub fn bump_core_func_idxs(wat: String) -> parser::Result<String> {
-    todo!()
+pub fn bump_core_func_idxs(
+    wat: &Wat,
+    output: &mut String,
+    total_increment: &mut OffsetTracker,
+) -> parser::Result<()> {
+    // What to bump
+    // (realloc <funcidx>)
+    // ((canon lift (core func <funcidx>)))
+
+    for field in get_fields(&wat).ok_or(Error::new(
+        wat.span(),
+        "Input WAT file could not be parsed (may be binary or module)".to_string(),
+    ))? {
+        match field {
+            ComponentField::CoreFunc(cf) => match &cf.kind {
+                CoreFuncKind::Lower(cl) => {
+                    // The func contained is a comp func, we want to find the realloc optioon
+                    for opt in &cl.opts {
+                        match opt {
+                            CanonOpt::Realloc(re) => {
+                                total_increment.increment_idx(output, re.idx, None);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            },
+            ComponentField::Func(f) => match &f.kind {
+                FuncKind::Lift { ty: _, info } => {
+                    total_increment.increment_idx(output, info.func.idx, None);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    Ok(())
 }
 
-pub fn bump_type_idxs(wat: String) -> parser::Result<String> {
+pub fn bump_type_idxs(
+    wat: &Wat,
+    output: &mut String,
+    total_increment: &mut OffsetTracker,
+) -> parser::Result<()> {
     // Things to bump
     // canon resource.drop
     // type( func (result $ty))
@@ -507,10 +605,6 @@ pub fn bump_type_idxs(wat: String) -> parser::Result<String> {
 
     // TODO compute this instead of hardcoding
     let LOWER_BOUND: u32 = 18;
-    let mut output = wat.clone();
-    let mut buf = ParseBuffer::new(&wat)?;
-    let wat = parse::<Wat>(&buf)?;
-    let mut total_increment = 0;
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -535,28 +629,16 @@ pub fn bump_type_idxs(wat: String) -> parser::Result<String> {
                 TypeDef::Component(c) => {
                     for decl in &c.decls {
                         match decl {
-                            ComponentTypeDecl::CoreType(ct) => {
-                                todo!()
-                            }
+                            ComponentTypeDecl::CoreType(ct) => {}
                             ComponentTypeDecl::Type(ty) => idxs.append(&mut idxs_in_type(ty)),
-                            ComponentTypeDecl::Alias(_) => {
-                                todo!()
-                            }
-                            ComponentTypeDecl::Import(i) => {
-                                todo!()
-                            }
-                            ComponentTypeDecl::Export(e) => {
-                                todo!()
-                            }
+                            ComponentTypeDecl::Alias(_) => {}
+                            ComponentTypeDecl::Import(i) => {}
+                            ComponentTypeDecl::Export(e) => {}
                         }
                     }
                 }
-                TypeDef::Instance(i) => {
-                    todo!()
-                }
-                TypeDef::Resource(r) => {
-                    todo!()
-                }
+                TypeDef::Instance(i) => {}
+                TypeDef::Resource(r) => {}
             }
             idxs
         }
@@ -564,23 +646,20 @@ pub fn bump_type_idxs(wat: String) -> parser::Result<String> {
         match field {
             ComponentField::CoreFunc(f) => {
                 if let CoreFuncKind::ResourceDrop(rd) = &f.kind {
-                    total_increment +=
-                        increment_idx(&mut output, rd.ty, total_increment, Some(LOWER_BOUND));
+                    total_increment.increment_idx(output, rd.ty, Some(LOWER_BOUND));
                 }
             }
             // make this a function in this scope ig
             ComponentField::Type(t) => {
                 let idxs = idxs_in_type(&t);
                 for idx in idxs {
-                    total_increment +=
-                        increment_idx(&mut output, idx, total_increment, Some(LOWER_BOUND));
+                    total_increment.increment_idx(output, idx, Some(LOWER_BOUND));
                 }
             }
             ComponentField::Func(f) => {
                 if let FuncKind::Lift { ty, .. } = &f.kind {
                     if let ComponentTypeUse::Ref(r) = ty {
-                        total_increment +=
-                            increment_idx(&mut output, r.idx, total_increment, Some(LOWER_BOUND));
+                        total_increment.increment_idx(output, r.idx, Some(LOWER_BOUND));
                     }
                 }
             }
@@ -588,11 +667,41 @@ pub fn bump_type_idxs(wat: String) -> parser::Result<String> {
         }
     }
 
-    Ok(output)
+    Ok(())
 }
 
-pub fn add_canon_lower_and_instance(wat: String) -> parser::Result<String> {
-    todo!()
+pub fn add_canon_lower_and_instance(
+    wat: &Wat,
+    output: &mut String,
+    total_increment: &mut OffsetTracker,
+) -> parser::Result<()> {
+    let canon_lower = format!("(core func ${0} (canon lower (func ${0})))", INC_FUNC_NAME);
+    let instantiate = format!(
+        "(core instance ${0} (export \"{1}\" (func ${1})))",
+        INC_MODULE_NAME, INC_FUNC_NAME
+    );
+
+    let mut has_passed_modules = false;
+    let mut offset = None;
+    for field in get_fields(&wat).ok_or(Error::new(
+        wat.span(),
+        "Input WAT file could not be parsed (may be binary or module)".to_string(),
+    ))? {
+        match field {
+            ComponentField::CoreModule(_) => has_passed_modules = true,
+            _ => {
+                if has_passed_modules {
+                    offset = Some(get_span(field).offset());
+                    break;
+                }
+            }
+        }
+    }
+    let offset = offset.unwrap() - 1;
+    let msg = format!("{}\n{}\n", canon_lower, instantiate);
+    total_increment.add_to_string(output, offset, &msg);
+
+    Ok(())
 }
 
 pub fn insert_counters<'a>(wat: String) -> parser::Result<String> {

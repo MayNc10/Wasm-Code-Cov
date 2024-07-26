@@ -1,9 +1,9 @@
-use std::{io::Read, path::PathBuf};
 use std::io;
+use std::{io::Read, path::PathBuf};
 
 use clap::{ArgGroup, Parser};
 
-use wat_annotator::counter::insert_counters;
+use wat_annotator::counter::add_scaffolding;
 
 #[derive(Parser)]
 #[clap(group(
@@ -23,12 +23,12 @@ fn main() -> io::Result<()> {
     if cli.path.is_none() && cli.text.is_none() {
         // try read text from stdin
         let mut buffer = String::new();
-        let mut stdin = io::stdin(); 
+        let mut stdin = io::stdin();
         stdin.read_to_string(&mut buffer)?;
         cli.text = Some(buffer.to_string());
     }
-    
-    let output = insert_counters(cli.text.unwrap());
+
+    let output = add_scaffolding(cli.text.unwrap());
     println!("{}", output.unwrap());
     Ok(())
 }

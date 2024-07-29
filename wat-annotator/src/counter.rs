@@ -1,9 +1,10 @@
+use std::fmt::format;
 use std::mem;
 use std::ops::Range;
 
 use regex::Regex;
 use wasmparser::{Chunk, ComponentInstance, Parser, Payload};
-use wast::core::{Instruction, ModuleField, ModuleKind};
+use wast::core::{ExportKind, Instruction, ModuleField, ModuleKind};
 use wast::parser::{parse, ParseBuffer};
 use wast::token::{Index, Span};
 use wast::{component::*, Wat};
@@ -325,6 +326,8 @@ pub fn add_scaffolding(wat: String) -> parser::Result<String> {
     bump_comp_func_idxs(&wat, &mut output, &mut total_increment)?;
     bump_core_func_idxs(&wat, &mut output, &mut total_increment)?;
     bump_type_idxs(&wat, &mut output, &mut total_increment)?;
+    add_instantiaion_arg(&wat, &mut output, &mut total_increment)?;
+    //panic!("erm.. what the bug");
     add_canon_lower_and_instance(&wat, &mut output, &mut total_increment)?;
     Ok(output)
 }
@@ -367,12 +370,12 @@ pub fn add_imports_in_module(
     output: &mut String,
     total_increment: &mut OffsetTracker,
 ) -> parser::Result<()> {
-    let mut offset = 0;
-    for field in get_fields(&wat).ok_or(Error::new(
+    'comp: for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
         if let ComponentField::CoreModule(m) = field {
+            let mut offset = 0;
             // parse module fields
             if let CoreModuleKind::Inline { fields } = &m.kind {
                 let mut was_last_import = false;
@@ -380,6 +383,7 @@ pub fn add_imports_in_module(
                     if let ModuleField::Import(_) = field {
                         was_last_import = true
                     } else if was_last_import {
+                        was_last_import = false;
                         if let Some(span) = get_module_span(field) {
                             offset = span.offset() - 1;
                             break 'module;
@@ -389,13 +393,17 @@ pub fn add_imports_in_module(
             }
             // FIXME: Account for modules that end after imports (somehow)
             if offset == 0 {
+                /*
                 return Err(Error::new(
                     m.span,
                     "Module had no fields after imports".to_string(),
                 ));
+                */
+                eprintln!("Module had no fields after imports");
+                continue 'comp;
             }
             let msg = format!(
-                "(import \"{0}\" \"{1}\" (func ${1} (param i32)))",
+                "(import \"{0}\" \"{1}\" (func ${1} (param i32)))\n",
                 INC_MODULE_NAME, INC_FUNC_NAME
             );
 
@@ -471,12 +479,12 @@ pub fn bump_instance_idxs(
     ))? {
         match field {
             ComponentField::Alias(a) => match a.target {
-                AliasTarget::Export { instance: idx, .. }
-                | AliasTarget::CoreExport { instance: idx, .. } => {
+                AliasTarget::CoreExport { instance: idx, .. } => {
                     // TODO Figure out lower bound flexibly
 
                     total_increment.increment_idx(output, idx, None);
                 }
+                AliasTarget::Export { instance: idx, .. } => {}
                 _ => {}
             },
             ComponentField::Instance(i) => {
@@ -492,6 +500,21 @@ pub fn bump_instance_idxs(
                     }
                 }
             }
+            ComponentField::CoreInstance(i) => match &i.kind {
+                CoreInstanceKind::Instantiate { module: _, args } => {
+                    for arg in args {
+                        match &arg.kind {
+                            // I think this is the right match for an instance arg
+                            CoreInstantiationArgKind::Instance(iref) => {
+                                total_increment.increment_idx(output, iref.idx, None);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            },
+
             _ => {}
         }
     }
@@ -518,8 +541,45 @@ pub fn bump_comp_func_idxs(
                 CoreFuncKind::Lower(cl) => total_increment.increment_idx(output, cl.func.idx, None),
                 _ => {}
             },
+            ComponentField::CoreInstance(i) => match &i.kind {
+                CoreInstanceKind::Instantiate { module, args } => {
+                    for arg in args {
+                        match &arg.kind {
+                            // I think this is the right match for an instance arg
+                            CoreInstantiationArgKind::Instance(_) => {
+                                // no-op
+                            }
+                            CoreInstantiationArgKind::BundleOfExports(_, exports) => {
+                                for export in exports {
+                                    match &export.item.kind {
+                                        ExportKind::Func => {
+                                            total_increment.increment_idx(
+                                                output,
+                                                export.item.idx,
+                                                None,
+                                            );
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                CoreInstanceKind::BundleOfExports(exps) => {
+                    for export in exps {
+                        match export.item.kind {
+                            ExportKind::Func => {
+                                total_increment.increment_idx(output, export.item.idx, None);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            },
             ComponentField::Instance(i) => match &i.kind {
-                InstanceKind::Instantiate { component: _, args } => {
+                InstanceKind::Instantiate { component, args } => {
+                    eprintln!("comp: {:?}, args: {:?}", component, args);
                     for arg in args {
                         match &arg.kind {
                             // I think this is the right match for an instance arg
@@ -667,6 +727,39 @@ pub fn bump_type_idxs(
         }
     }
 
+    Ok(())
+}
+
+pub fn add_instantiaion_arg(
+    wat: &Wat,
+    output: &mut String,
+    total_increment: &mut OffsetTracker,
+) -> parser::Result<()> {
+    for field in get_fields(&wat).ok_or(Error::new(
+        wat.span(),
+        "Input WAT file could not be parsed (may be binary or module)".to_string(),
+    ))? {
+        match field {
+            ComponentField::CoreInstance(ci) => match &ci.kind {
+                CoreInstanceKind::Instantiate { .. } => {
+                    eprintln!("Core instance: {ci:?}, offset: {}", ci.span.offset());
+                    // parse with regex
+                    let msg = format!(
+                        "(with \"{}\" (instance ${}))",
+                        INC_MODULE_NAME, INC_MODULE_NAME
+                    );
+                    let re = Regex::new(INSTANTIATION_REGEX_STR).unwrap();
+                    let c = |s: &mut String, _, end| {
+                        s.insert_str(end, &msg);
+                        (end, msg.len())
+                    };
+                    total_increment.modify_with_regex_match(output, &re, ci.span.offset(), c);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
     Ok(())
 }
 

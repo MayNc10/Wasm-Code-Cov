@@ -1,3 +1,6 @@
+use core::str;
+
+use regex::{Match, Regex};
 use wast::token::Index;
 
 // Makes it more readable?
@@ -87,6 +90,38 @@ impl OffsetTracker {
                 }
             }
             Index::Id(_) => {}
+        }
+    }
+
+    pub fn modify_with_regex_match<F>(
+        &mut self,
+        output: &mut String,
+        re: &Regex,
+        loc: Location,
+        f: F,
+    ) where
+        F: FnOnce(&mut String, Location, Location) -> (Location, Offset),
+    {
+        let idx = self.find_break_idx(loc);
+        let end = match idx {
+            Some(idx) => idx,
+            None => self.offsets.len(),
+        };
+        let loc = loc
+            + self.offsets[..end]
+                .iter()
+                .map(|(_, offset)| offset)
+                .fold(0, |acc, offset| acc + offset);
+        let slice = str::from_utf8_mut(unsafe { output[loc..].as_bytes_mut() }).unwrap();
+        let m = re.find(slice);
+        if let Some(m) = m {
+            let (start, end) = (m.start(), m.end());
+            let pair = f(output, loc + start, loc + end);
+            if idx.is_some() {
+                self.offsets.insert(end, pair);
+            } else {
+                self.offsets.push(pair);
+            }
         }
     }
 }

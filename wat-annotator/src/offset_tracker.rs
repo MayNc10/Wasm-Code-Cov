@@ -118,7 +118,7 @@ impl OffsetTracker {
             let (start, end) = (m.start(), m.end());
             let pair = f(output, loc + start, loc + end);
             if idx.is_some() {
-                self.offsets.insert(end, pair);
+                self.offsets.insert(idx.unwrap(), pair);
             } else {
                 self.offsets.push(pair);
             }

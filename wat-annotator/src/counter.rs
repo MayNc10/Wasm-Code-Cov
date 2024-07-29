@@ -321,7 +321,7 @@ pub fn add_scaffolding(wat: String) -> parser::Result<String> {
 
     add_inc_import_section(&wat, &mut output, &mut total_increment)?;
     add_imports_in_module(&wat, &mut output, &mut total_increment)?;
-    // add_func_calls(&wat, &mut output, &mut total_increment)?;
+    add_func_calls(&wat, &mut output, &mut total_increment)?;
     bump_instance_idxs(&wat, &mut output, &mut total_increment)?;
     bump_comp_func_idxs(&wat, &mut output, &mut total_increment)?;
     bump_core_func_idxs(&wat, &mut output, &mut total_increment)?;
@@ -420,6 +420,7 @@ pub fn add_func_calls(
     output: &mut String,
     total_increment: &mut OffsetTracker,
 ) -> parser::Result<()> {
+    let mut counter_idx = 0;
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -444,10 +445,15 @@ pub fn add_func_calls(
                                     | Instruction::Else(_)
                                     | Instruction::Loop(_) => {
                                         // insert line here
-                                        let msg = format!(";; hai :3");
+                                        let msg = format!(
+                                            "i32.const {} call ${}\n",
+                                            counter_idx, INC_FUNC_NAME
+                                        );
+                                        counter_idx += 1;
+
                                         total_increment.add_to_string(
                                             output,
-                                            spans[idx].offset(),
+                                            spans[idx].offset() - 1,
                                             &msg,
                                         );
                                     }

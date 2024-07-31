@@ -1,3 +1,4 @@
+use colored::Colorize;
 use component::{Component, ResourceTable};
 use wasmtime::*;
 use wasmtime_wasi::{
@@ -90,7 +91,11 @@ fn main() -> wasmtime::Result<()> {
                         .into_iter(),
                 );
             }
-            println!("Accessed idx #{}", idx);
+            println!(
+                "{} {}",
+                "RUNNER HOST:".red(),
+                format!("Accessed idx #{}", idx).dimmed()
+            );
             Ok(())
         })?;
 

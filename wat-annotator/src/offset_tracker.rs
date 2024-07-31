@@ -11,6 +11,12 @@ pub struct OffsetTracker {
     offsets: Vec<(Location, Offset)>,
 }
 
+// TODO
+// Currently we implement things by counting by index
+// and preserving the order of the offsets
+// but if we used filter iterators like in the slice fn
+// Then we dont have to preserve order
+// change this!
 impl OffsetTracker {
     pub fn new() -> OffsetTracker {
         OffsetTracker {
@@ -123,5 +129,16 @@ impl OffsetTracker {
                 self.offsets.push(pair);
             }
         }
+    }
+
+    pub fn get_slice_from<'a>(&self, output: &'a String, start: Location) -> &'a str {
+        let loc = start
+            + self
+                .offsets
+                .iter()
+                .filter(|(loc, _)| *loc <= start)
+                .map(|(_, offset)| *offset)
+                .sum::<usize>();
+        str::from_utf8(&output.as_bytes()[loc..]).unwrap()
     }
 }

@@ -4,12 +4,13 @@ use std::ops::Range;
 
 use regex::Regex;
 use wasmparser::{Chunk, ComponentInstance, Parser, Payload};
-use wast::core::{ExportKind, Instruction, ModuleField, ModuleKind};
+use wast::core::{ExportKind, Func, Instruction, ModuleField, ModuleKind};
 use wast::parser::{parse, ParseBuffer};
-use wast::token::{Index, Span};
+use wast::token::{Id, Index, Span};
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
+use crate::blacklist::Blacklist;
 use crate::offset_tracker::OffsetTracker;
 
 const COUNTER_REGEX_STR: &str = r"(?m)^\s*(loop|if|else|block)";
@@ -17,6 +18,8 @@ const MODULE_REGEX_STR: &str = r"\(core module";
 const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
 const INDEXNUM_REGEX_STR: &str = r"\(;(?P<idx>[0-9]+);\)";
 const INDEXNUM_REPLACE_REGEX_STR: &str = r"$$$idx";
+const CORE_EXPORT_REGEX_STR: &str =
+    r#"\(alias core export [0-9]+ ".*" \(core func \(;(?<idx>[0-9]+);\)\)\)"#;
 const MODULE_NAME: &str = "counter-warm-code-cov";
 const INSTANCE_NAME: &str = "counter-warm-code-cov-instance";
 const PAGE_SIZE: usize = 64 * (2 << 10); // 64 KB
@@ -293,7 +296,7 @@ pub fn increment_idx(
     }
 }
 
-pub fn get_fields<'a>(comp: &'a Wat) -> Option<&'a Vec<ComponentField<'a>>> {
+pub fn get_fields<'a, 'b: 'a>(comp: &'b Wat<'a>) -> Option<&'a Vec<ComponentField<'a>>> {
     match comp {
         Wat::Module(_) => None,
         Wat::Component(comp) => match &comp.kind {
@@ -321,10 +324,15 @@ pub fn add_scaffolding(wat: String) -> parser::Result<String> {
 
     add_inc_import_section(&wat, &mut output, &mut total_increment)?;
     add_imports_in_module(&wat, &mut output, &mut total_increment)?;
-    add_func_calls(&wat, &mut output, &mut total_increment)?;
+    {
+        let bl = bump_core_func_idxs(&wat, &mut output, &mut total_increment)?;
+        // process blacklisted functions
+        let bl = process_blacklist(&wat, bl)?;
+        add_func_calls(&wat, &mut output, &mut total_increment, bl)?;
+    }
+
     bump_instance_idxs(&wat, &mut output, &mut total_increment)?;
     bump_comp_func_idxs(&wat, &mut output, &mut total_increment)?;
-    bump_core_func_idxs(&wat, &mut output, &mut total_increment)?;
     bump_type_idxs(&wat, &mut output, &mut total_increment)?;
     add_instantiaion_arg(&wat, &mut output, &mut total_increment)?;
     //panic!("erm.. what the bug");
@@ -415,10 +423,11 @@ pub fn add_imports_in_module(
 }
 
 // todo actually add function calls lol
-pub fn add_func_calls(
-    wat: &Wat,
+pub fn add_func_calls<'a>(
+    wat: &'a Wat,
     output: &mut String,
     total_increment: &mut OffsetTracker,
+    blacklist: Vec<(Index<'a>, &'a Func<'a>)>,
 ) -> parser::Result<()> {
     let mut counter_idx = 0;
     for field in get_fields(&wat).ok_or(Error::new(
@@ -430,6 +439,16 @@ pub fn add_func_calls(
             if let CoreModuleKind::Inline { fields } = &m.kind {
                 for field in fields {
                     if let ModuleField::Func(func) = field {
+                        if blacklist
+                            .iter()
+                            .filter(|(_, f)| f.span == func.span)
+                            .next()
+                            .is_some()
+                        {
+                            continue;
+                        }
+                        eprintln!("Func defined @{}", func.span.offset());
+
                         if let wast::core::FuncKind::Inline {
                             locals: _,
                             expression,
@@ -617,15 +636,16 @@ pub fn bump_comp_func_idxs(
     Ok(())
 }
 
-pub fn bump_core_func_idxs(
-    wat: &Wat,
-    output: &mut String,
-    total_increment: &mut OffsetTracker,
-) -> parser::Result<()> {
+pub fn bump_core_func_idxs<'a, 'b: 'a, 'c>(
+    wat: &'b Wat,
+    output: &'c mut String,
+    total_increment: &'c mut OffsetTracker,
+) -> parser::Result<Vec<Index<'a>>> {
     // What to bump
     // (realloc <funcidx>)
     // ((canon lift (core func <funcidx>)))
 
+    let mut bl = Vec::new();
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -638,6 +658,7 @@ pub fn bump_core_func_idxs(
                         match opt {
                             CanonOpt::Realloc(re) => {
                                 total_increment.increment_idx(output, re.idx, None);
+                                bl.push(re.idx);
                             }
                             _ => {}
                         }
@@ -655,7 +676,231 @@ pub fn bump_core_func_idxs(
         }
     }
 
-    Ok(())
+    Ok(bl)
+}
+
+pub fn process_blacklist<'a, 'b: 'a>(
+    wat: &'a Wat,
+    blacklist: Vec<Index<'a>>,
+) -> parser::Result<Vec<(Index<'a>, &'a Func<'a>)>> {
+    // logic:
+    // we have a vector of export references
+    // that label the name of the export and the module where it was defined
+    // we have a queue of functions to get done
+    // we go through every function in the queue
+    // finding its moduledef and which function it corresponds to
+    // by finding the export statement that exports the name we'ere looking for
+
+    let queue = map_idx_to_module(wat, blacklist)?;
+    let mut blacklist: Vec<(Index, &Func)> = Vec::new();
+    let fields = get_fields(&wat).ok_or(Error::new(
+        wat.span(),
+        "Input WAT file could not be parsed (may be binary or module)".to_string(),
+    ))?;
+    // create a module map
+    let mut mods = Vec::new();
+    for field in fields {
+        if let ComponentField::CoreModule(m) = field {
+            mods.push(m);
+        }
+    }
+    // helper function
+    fn idx_to_func<'a, 'b: 'a, 'c: 'b>(
+        idx: Index<'a>,
+        fields: &'c Vec<ModuleField<'a>>,
+    ) -> Option<&'a Func<'a>> {
+        let mut func = None;
+        match idx {
+            Index::Id(id) => {
+                for field in fields {
+                    if let ModuleField::Func(f) = field {
+                        if let Some(f_id) = f.id {
+                            if f_id == id {
+                                func = Some(f);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            Index::Num(num, _) => {
+                let mut idx = 0;
+                for field in fields {
+                    if let ModuleField::Func(f) = field {
+                        if idx == num {
+                            func = Some(f);
+                            break;
+                        }
+                        idx += 1;
+                    }
+                }
+            }
+        }
+        func
+    }
+    // map exports to function idxs
+    let mut queue = queue
+        .into_iter()
+        .map(|(mod_idx, export_name)| {
+            if let Index::Num(num, _) = mod_idx {
+                if let CoreModuleKind::Inline { fields } = &mods[num as usize].kind {
+                    // find the export we're looking for
+                    let mut func = None;
+                    for field in fields {
+                        if let ModuleField::Export(exp) = field {
+                            if exp.name == export_name && exp.kind == ExportKind::Func {
+                                // do code
+                                let func_idx = exp.item;
+                                func = idx_to_func(func_idx, fields);
+                                if func.is_some() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    let func = func.unwrap();
+                    (mod_idx, func)
+                } else {
+                    todo!()
+                }
+            } else {
+                todo!()
+            }
+        })
+        .collect::<Vec<_>>();
+    // Now we have an iterator of module references and functions
+    // Now we go through each func,
+    'queue: while let Some((mod_idx, func)) = queue.pop() {
+        eprintln!("Blacklisting func id: {:?}, name: {:?}", func.id, func.name);
+
+        if let wast::core::FuncKind::Inline {
+            locals: _,
+            expression,
+        } = &func.kind
+        {
+            // we can do this comparison based on spans i think
+            // bc they should be unique to the function
+            if blacklist
+                .iter()
+                .filter(|(_, f)| f.span == func.span)
+                .next()
+                .is_some()
+            {
+                continue;
+            }
+
+            let debug = func.id.is_some_and(|id| id.name() == "allocate_stack");
+            if debug {
+                eprintln!("IN CABI REALLOC");
+            }
+
+            //  the todos can be here bc like
+            // if we already have a funcref then this kinda has to be a core inline module
+            // but we can rewrite later
+            if let Index::Num(num, _) = mod_idx {
+                if let CoreModuleKind::Inline { fields } = &mods[num as usize].kind {
+                    for instr in &*expression.instrs {
+                        if let Instruction::Call(f_idx) = instr {
+                            if debug {
+                                eprintln!("FUNCTION CALL IN CABI REALLOC, IDX: {:?}", f_idx);
+                            }
+
+                            // find the function reference, which will be part of the current module
+                            let new_func = idx_to_func(*f_idx, fields);
+                            if new_func.is_none() {
+                                // Most likely an import
+                                // For now, we can just decide to skip adding it
+                                // We would do this anyway bc once it calls out to an import it's leaving the instance anyway
+                                if debug {
+                                    eprintln!("DIDNT FIND FUNCTION IDX IN MODULE");
+                                }
+                                continue;
+                            } else if debug {
+                                eprintln!(
+                                    "IN CABI REALLOC FUNCTION WAS FOUND, NEW FUNC ID: {:?}",
+                                    new_func.unwrap().id
+                                )
+                            }
+                            let new_func = new_func.unwrap();
+                            queue.push((mod_idx, new_func));
+                        }
+                    }
+                } else {
+                    todo!()
+                }
+            } else {
+                eprintln!("Module index: ${:?}", mod_idx);
+                todo!()
+            }
+
+            blacklist.push((mod_idx, func));
+            eprintln!(
+                "Finished blacklisting func id: {:?}, name: {:?}",
+                func.id, func.name
+            );
+        }
+    }
+
+    Ok(blacklist)
+}
+
+fn map_idx_to_module<'a, 'b: 'a>(
+    wat: &'a Wat,
+    blacklist: Vec<Index<'a>>,
+) -> parser::Result<Vec<(Index<'a>, &'a str)>> {
+    let mut out = Vec::new();
+    let mut core_func_idx = 0;
+    let mut core_instances: Vec<Option<&ItemRef<_>>> = Vec::new();
+    for field in get_fields(&wat).ok_or(Error::new(
+        wat.span(),
+        "Input WAT file could not be parsed (may be binary or module)".to_string(),
+    ))? {
+        match field {
+            ComponentField::Alias(a) => match a.target {
+                AliasTarget::CoreExport {
+                    instance,
+                    name,
+                    kind,
+                } => {
+                    if kind == ExportKind::Func {
+                        if blacklist
+                            .iter()
+                            .filter(|idx| match idx {
+                                Index::Num(num, _) => *num == core_func_idx,
+                                Index::Id(_) => todo!(),
+                            })
+                            .next()
+                            .is_some()
+                        {
+                            // do something with the instance info
+                            let idx = match instance {
+                                Index::Num(num, _) => num,
+                                Index::Id(_) => todo!(),
+                            } as usize;
+                            let instance_ref: &ItemRef<_> = core_instances[idx].unwrap();
+                            out.push((instance_ref.idx, name));
+                        }
+                        core_func_idx += 1;
+                    }
+                }
+                _ => {}
+            },
+            ComponentField::CoreFunc(f) => {
+                eprintln!("TODO: parse core func");
+                core_func_idx += 1;
+            }
+            ComponentField::CoreInstance(i) => match &i.kind {
+                CoreInstanceKind::Instantiate { module, .. } => {
+                    core_instances.push(Some(module));
+                }
+                CoreInstanceKind::BundleOfExports(_) => {
+                    core_instances.push(None);
+                }
+            },
+            _ => {}
+        }
+    }
+    Ok(out)
 }
 
 pub fn bump_type_idxs(

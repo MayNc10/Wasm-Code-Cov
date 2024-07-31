@@ -3,7 +3,7 @@ use std::{io::Read, path::PathBuf};
 
 use clap::{ArgGroup, Parser};
 
-use wat_annotator::counter::add_scaffolding;
+use wat_annotator::annotate::add_scaffolding;
 
 #[derive(Parser)]
 #[clap(group(

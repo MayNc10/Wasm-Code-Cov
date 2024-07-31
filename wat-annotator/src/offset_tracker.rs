@@ -1,6 +1,6 @@
 use core::str;
 
-use regex::{Match, Regex};
+use regex::Regex;
 use wast::token::Index;
 
 // Makes it more readable?
@@ -66,7 +66,7 @@ impl OffsetTracker {
     // idk
     pub fn increment_idx(&mut self, output: &mut String, idx: Index, lower_bound: Option<u32>) {
         match idx {
-            Index::Num(num, span) => {
+            Index::Num(num, _) => {
                 if num >= lower_bound.unwrap_or(0) {
                     let end = match self.find_break_idx(idx.span().offset()) {
                         Some(i) => i,

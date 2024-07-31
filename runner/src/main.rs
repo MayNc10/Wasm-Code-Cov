@@ -30,10 +30,6 @@ struct ConstantIterator<T: Copy + Clone> {
 }
 
 impl<T: Copy + Clone> ConstantIterator<T> {
-    fn new(value: T, count: usize) -> ConstantIterator<T> {
-        ConstantIterator { value, count }
-    }
-
     fn new_default_value(count: usize) -> ConstantIterator<T>
     where
         T: Default,

@@ -6,7 +6,7 @@ cargo component build -p example-component
 #NEW=$(wasm-tools print $HOME/warm-code-cov/target/wasm32-wasi*/debug/example-component.wasm | $HOME/warm-code-cov/target/release/wat-annotator)
 
 cargo b -p wat-annotator
-NEW=$(wasm-tools print $HOME/warm-code-cov/target/wasm32-wasi*/debug/example-component.wasm | $HOME/warm-code-cov/target/debug/wat-annotator)
+NEW=$(wasm-tools print -g $HOME/warm-code-cov/target/wasm32-wasi*/debug/example-component.wasm | $HOME/warm-code-cov/target/debug/wat-annotator)
 
 #echo "${NEW}"
 echo "${NEW}" > modified.wat

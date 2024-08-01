@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.5.8", features = ["derive"] }
 colored = "2.0.0"
 wasmtime = { version = "22.0.0", features = ["runtime", "component-model"] }
 wasmtime-wasi = "22.0.0"
+wat-annotator = { path = "../wat-annotator" }

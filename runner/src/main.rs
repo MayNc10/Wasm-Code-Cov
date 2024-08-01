@@ -4,8 +4,7 @@ use wasmtime::*;
 use wasmtime_wasi::{
     bindings::sync::exports::wasi::cli::run::Guest, WasiCtx, WasiCtxBuilder, WasiView,
 };
-
-const FILE_BYTES: &[u8] = include_bytes!("../../modified.wat");
+use wat_annotator::CounterType;
 
 struct MyState {
     ctx: WasiCtx,
@@ -59,7 +58,43 @@ impl<T: Copy + Clone> Iterator for ConstantIterator<T> {
     }
 }
 
+use std::{fs, io};
+use std::{io::Read, path::PathBuf};
+
+use clap::{ArgGroup, Parser};
+#[derive(Parser)]
+#[clap(group(
+    ArgGroup::new("input")
+        .args(&["path", "text"])
+))]
+struct Cli {
+    #[arg(short, long, value_name = "FILE")]
+    path: Option<PathBuf>,
+
+    #[arg(short, long, value_name = "BYTES")]
+    bytes: Option<Vec<u8>>,
+}
+
 fn main() -> wasmtime::Result<()> {
+    let mut cli = Cli::parse();
+    if cli.path.is_none() && cli.bytes.is_none() {
+        // try read text from stdin
+        let mut buffer = Vec::new();
+        let mut stdin = io::stdin();
+        stdin
+            .read_to_end(&mut buffer)
+            .map_err(|e| wasmtime::Error::new(e))?;
+        cli.bytes = Some(buffer);
+    }
+
+    let bytes = if let Some(bytes) = cli.bytes {
+        bytes
+    } else if let Some(path) = cli.path {
+        fs::read(path).map_err(wasmtime::Error::new)?
+    } else {
+        unreachable!()
+    };
+
     let engine = Engine::default();
 
     let mut linker = component::Linker::<MyState>::new(&engine);
@@ -78,8 +113,12 @@ fn main() -> wasmtime::Result<()> {
 
     linker
         .root()
-        .func_wrap("inc-counter", |mut store, idx: (i32,)| {
-            let idx = idx.0 as usize;
+        .func_wrap("inc-counter", |mut store, args: (i32, i32, i32)| {
+            let (idx, ty, line_num) = (
+                args.0 as usize,
+                CounterType::from_i32(args.1).unwrap(),
+                args.1,
+            );
             let counters = &mut store.data_mut().counters;
             if counters.len() <= idx {
                 counters.extend(
@@ -88,14 +127,17 @@ fn main() -> wasmtime::Result<()> {
                 );
             }
             println!(
-                "{} {}",
+                "{} {} {} {} {}",
                 "RUNNER HOST:".red(),
-                format!("Accessed idx #{}", idx).dimmed()
+                format!("Accessed idx #{}, type:", idx).dimmed(),
+                format!("%{}", ty).green(),
+                format!(", source line number:").dimmed(),
+                format!("@{}", line_num).yellow(),
             );
             Ok(())
         })?;
 
-    let component = Component::new(&engine, FILE_BYTES)?;
+    let component = Component::new(&engine, &bytes)?;
 
     let instance = linker.instantiate(&mut store, &component)?;
     let mut exports = instance.exports(&mut store);

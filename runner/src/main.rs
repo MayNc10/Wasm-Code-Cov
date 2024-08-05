@@ -1,5 +1,6 @@
 use colored::Colorize;
 use component::{Component, ResourceTable};
+use runner::gcov::SrcLineMap;
 use wasmtime::*;
 use wasmtime_wasi::{
     bindings::sync::exports::wasi::cli::run::Guest, WasiCtx, WasiCtxBuilder, WasiView,
@@ -10,6 +11,7 @@ struct MyState {
     ctx: WasiCtx,
     table: ResourceTable,
     counters: Vec<i32>,
+    src_map: SrcLineMap,
 }
 
 impl WasiView for MyState {
@@ -126,6 +128,7 @@ fn main() -> wasmtime::Result<()> {
                         .into_iter(),
                 );
             }
+            store.data_mut().src_map.add_to_line(line_num as u64);
             println!(
                 "{} {} {} {} {}",
                 "RUNNER HOST:".red(),

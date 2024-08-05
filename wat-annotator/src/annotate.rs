@@ -1,15 +1,26 @@
+use core::{panic, str};
+use std::collections::HashMap;
+use std::path;
+
+use gimli::write::Attribute;
+use gimli::{AttributeValue, DebugAbbrev, DebugInfo, DebugLine, DwAt, Reader};
 use regex::Regex;
-use wast::core::{ExportKind, Func, Instruction, ModuleField};
+use wast::core::{Custom, ExportKind, Func, Instruction, ModuleField};
 use wast::parser::{parse, ParseBuffer};
 use wast::token::{Index, Span};
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
 use crate::offset_tracker::OffsetTracker;
+use crate::CounterType;
 
 const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
 const INC_FUNC_NAME: &str = "inc-counter";
 const INC_MODULE_NAME: &str = "inc-counter-module";
+// Is there a good way to ensure that these are always compatible? maybe a macro
+const INC_FUNC_DESC_COMP: &str =
+    "(param \"idx\" s32) (param \"type\" s32) (param \"line-num\" s32)";
+const INC_FUNC_DESC_CORE: &str = "(param i32) (param i32) (param i32)";
 
 fn get_span(f: &ComponentField) -> Option<Span> {
     match f {
@@ -49,106 +60,6 @@ fn get_module_span(f: &ModuleField) -> Option<Span> {
     }
 }
 
-pub fn find_idxs<'a>(wat: &'a Wat) -> Option<Vec<Index<'a>>> {
-    let comp = match wat {
-        Wat::Component(c) => c,
-        Wat::Module(_) => return None,
-    };
-
-    let component_fields = match &comp.kind {
-        ComponentKind::Text(f) => f,
-        ComponentKind::Binary(_) => return None,
-    };
-
-    let mut idxs = Vec::new();
-
-    for field in component_fields {
-        match field {
-            ComponentField::Alias(_) => {
-                //eprintln!("Hit alias");
-            }
-            ComponentField::CanonicalFunc(cf) => {
-                //eprintln!("Hit cf");
-                // A canonical function can be a lowering of a component function
-                // in which case, we need to get the span
-                match &cf.kind {
-                    CanonicalFuncKind::Lower(cl) => {
-                        // I think this span is the span where the idx is used, not where its defined
-                        if let Index::Num(..) = cl.func.idx {
-                            idxs.push(cl.func.idx);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            ComponentField::Component(_) => {
-                //eprintln!("Hit component");
-            }
-            ComponentField::CoreFunc(cf) => {
-                //eprintln!("Hit core func");
-                // Even though this is a 'core func', its in the top level of the component, so i think it uses the function idxs there
-                if let CoreFuncKind::Lower(cl) = &cf.kind {
-                    // I think this span is the span where the idx is used, not where its defined
-                    if let Index::Num(..) = cl.func.idx {
-                        idxs.push(cl.func.idx);
-                    }
-                }
-                if let CoreFuncKind::ResourceDrop(rd) = &cf.kind {
-                    if let Index::Num(..) = rd.ty {
-                        idxs.push(rd.ty);
-                    }
-                }
-            }
-            ComponentField::CoreInstance(_) => {
-                //eprintln!("Hit core instance");
-            }
-            ComponentField::CoreModule(_) => {
-                //eprintln!("Hit core module");
-            }
-            ComponentField::CoreType(_) => {
-                //eprintln!("Hit core type");
-            }
-            ComponentField::Custom(_) => {
-                //eprintln!("Hit custom");
-            }
-            ComponentField::Export(_) => {
-                //eprintln!("Hit export");
-            }
-            ComponentField::Func(_) => {
-                //eprintln!("Hit func");
-            }
-            ComponentField::Import(_) => {
-                //eprintln!("Hit import");
-            }
-            ComponentField::Instance(_) => {
-                //eprintln!("Hit instance");
-            }
-            ComponentField::Producers(_) => {
-                //eprintln!("Hit producers");
-            }
-            ComponentField::Start(s) => {
-                //eprintln!("Hit start");
-                if let Index::Num(..) = s.func {
-                    idxs.push(s.func);
-                }
-            }
-            ComponentField::Type(t) => {
-                //eprintln!("Hit type");
-                if let TypeDef::Resource(r) = &t.def {
-                    if let Some(dtor) = &r.dtor {
-                        if let Index::Num(..) = dtor.idx {
-                            idxs.push(dtor.idx);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    //panic!("erm ... what the bug");
-
-    Some(idxs)
-}
-
 pub fn get_fields<'a, 'b: 'a>(comp: &'b Wat<'a>) -> Option<&'a Vec<ComponentField<'a>>> {
     match comp {
         Wat::Module(_) => None,
@@ -159,7 +70,7 @@ pub fn get_fields<'a, 'b: 'a>(comp: &'b Wat<'a>) -> Option<&'a Vec<ComponentFiel
     }
 }
 
-pub fn add_scaffolding(wat: String) -> parser::Result<String> {
+pub fn add_scaffolding(wat_text: String) -> parser::Result<String> {
     // Things to do: (in order)
     // Add import statement for the inc counter function (in type and import section)
     // Add import statements within each module
@@ -169,12 +80,13 @@ pub fn add_scaffolding(wat: String) -> parser::Result<String> {
     // Bump the index of any core function
     // Add canon lower of inc counter func (right after module sections)
     // Add instance exporting that core function
-    let mut output = wat.clone();
-    let mut buf = ParseBuffer::new(&wat)?;
+    let mut output = wat_text.clone();
+    let mut buf = ParseBuffer::new(&wat_text)?;
     let buf = buf.track_instr_spans(true);
     let wat = parse::<Wat>(buf)?;
     let mut total_increment = OffsetTracker::new();
 
+    read_dbg_info(&wat, &wat_text)?;
     add_inc_import_section(&wat, &mut output, &mut total_increment)?;
     add_imports_in_module(&wat, &mut output, &mut total_increment)?;
     {
@@ -218,8 +130,8 @@ pub fn add_inc_import_section(
     }
 
     let msg = format!(
-        "(import \"{0}\" (func ${0} (param \"idx\" s32)))",
-        INC_FUNC_NAME
+        "(import \"{0}\" (func ${0} {1}))",
+        INC_FUNC_NAME, INC_FUNC_DESC_COMP
     );
     total_increment.add_to_string(output, offset, &msg);
 
@@ -258,8 +170,8 @@ pub fn add_imports_in_module(
                 continue 'comp;
             }
             let msg = format!(
-                "(import \"{0}\" \"{1}\" (func ${1} (param i32)))\n",
-                INC_MODULE_NAME, INC_FUNC_NAME
+                "(import \"{0}\" \"{1}\" (func ${1} {2}))\n",
+                INC_MODULE_NAME, INC_FUNC_NAME, INC_FUNC_DESC_CORE
             );
 
             total_increment.add_to_string(output, offset, &msg);
@@ -309,10 +221,20 @@ pub fn add_func_calls<'a>(
                                     | Instruction::If(_)
                                     | Instruction::Else(_)
                                     | Instruction::Loop(_) => {
+                                        // theres gotta be a better way to do this
+                                        let ty = match instrs[idx] {
+                                            Instruction::Block(_) => CounterType::Block,
+                                            Instruction::If(_) => CounterType::If,
+                                            Instruction::Else(_) => CounterType::Else,
+                                            Instruction::Loop(_) => CounterType::Loop,
+                                            _ => unreachable!(),
+                                        };
+                                        let line_num = 0; // hard coded
+
                                         // insert line here
                                         let msg = format!(
-                                            "i32.const {} call ${}\n",
-                                            counter_idx, INC_FUNC_NAME
+                                            "i32.const {} i32.const {} i32.const {} call ${}\n",
+                                            counter_idx, ty as i32, line_num, INC_FUNC_NAME
                                         );
                                         counter_idx += 1;
 
@@ -891,5 +813,114 @@ pub fn add_canon_lower_and_instance(
     let msg = format!("{}\n{}\n", canon_lower, instantiate);
     total_increment.add_to_string(output, offset, &msg);
 
+    Ok(())
+}
+
+pub fn read_dbg_info(wat: &Wat, text: &str) -> parser::Result<()> {
+    for field in get_fields(&wat).ok_or(Error::new(
+        wat.span(),
+        "Input WAT file could not be parsed (may be binary or module)".to_string(),
+    ))? {
+        if let ComponentField::CoreModule(m) = field {
+            if let CoreModuleKind::Inline { fields } = &m.kind {
+                let mut section_map = HashMap::new();
+                let mut code_section_start = None;
+                for field in fields {
+                    if let ModuleField::Custom(c) = field {
+                        if let Custom::Raw(c) = c {
+                            let flattened_slice: Vec<u8> =
+                                c.data.iter().map(|a| Vec::from(*a)).flatten().collect(); // is there a way to do this without allocating?
+                            section_map.insert(c.name, flattened_slice);
+                        }
+                    } else if let ModuleField::Func(f) = field {
+                        code_section_start = Some(f.span.offset())
+                    }
+                }
+                let dwarf_sections = gimli::DwarfSections::load(|sec| {
+                    Ok(section_map
+                        .get(sec.name())
+                        .map(|v| v.as_slice())
+                        .unwrap_or(Default::default()))
+                })?;
+                let dwarf = dwarf_sections
+                    .borrow(|section| gimli::EndianSlice::new(section, gimli::LittleEndian));
+                let mut iter = dwarf.units();
+                while let Some(header) = iter.next().unwrap() {
+                    eprintln!(
+                        "Unit at <.debug_info+0x{:x}>",
+                        header.offset().as_debug_info_offset().unwrap().0
+                    );
+                    let unit = dwarf.unit(header).unwrap();
+                    let unit = unit.unit_ref(&dwarf);
+
+                    if let Some(program) = unit.line_program.clone() {
+                        let comp_dir = if let Some(ref dir) = unit.comp_dir {
+                            path::PathBuf::from(dir.to_string_lossy().into_owned())
+                        } else {
+                            path::PathBuf::new()
+                        };
+
+                        // Iterate over the line program rows.
+                        let mut rows = program.rows();
+                        while let Some((header, row)) = rows.next_row().unwrap() {
+                            if row.end_sequence() {
+                                // End of sequence indicates a possible gap in addresses.
+                                eprintln!("{:x} end-sequence", row.address());
+                            } else {
+                                // Determine the path. Real applications should cache this for performance.
+                                let mut path = path::PathBuf::new();
+                                if let Some(file) = row.file(header) {
+                                    path.clone_from(&comp_dir);
+
+                                    // The directory index 0 is defined to correspond to the compilation unit directory.
+                                    if file.directory_index() != 0 {
+                                        if let Some(dir) = file.directory(header) {
+                                            path.push(
+                                                unit.attr_string(dir)
+                                                    .unwrap()
+                                                    .to_string_lossy()
+                                                    .as_ref(),
+                                            );
+                                        }
+                                    }
+
+                                    path.push(
+                                        unit.attr_string(file.path_name())
+                                            .unwrap()
+                                            .to_string_lossy()
+                                            .as_ref(),
+                                    );
+                                }
+
+                                // Determine line/column. DWARF line/column is never 0, so we use that
+                                // but other applications may want to display this differently.
+                                let line = match row.line() {
+                                    Some(line) => line.get(),
+                                    None => 0,
+                                };
+                                let column = match row.column() {
+                                    gimli::ColumnType::LeftEdge => 0,
+                                    gimli::ColumnType::Column(column) => column.get(),
+                                };
+                                let text_offset = row.address() as usize + m.span.offset();
+                                //eprintln!("{:x}", text_offset);
+                                //panic!();
+
+                                eprintln!(
+                                    "{:x} (%{:?}) {}:{}:{}",
+                                    row.address(),
+                                    str::from_utf8(&text.as_bytes()[text_offset..text_offset + 10]),
+                                    path.display(),
+                                    line,
+                                    column
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    panic!("erm ... what the bug");
     Ok(())
 }

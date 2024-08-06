@@ -12,6 +12,7 @@ struct MyState {
     table: ResourceTable,
     counters: Vec<i32>,
     src_map: SrcLineMap,
+    file_map: Option<Vec<PathBuf>>,
 }
 
 impl WasiView for MyState {
@@ -60,6 +61,7 @@ impl<T: Copy + Clone> Iterator for ConstantIterator<T> {
     }
 }
 
+use std::fmt::Display;
 use std::{fs, io};
 use std::{io::Read, path::PathBuf};
 
@@ -67,7 +69,7 @@ use clap::{ArgGroup, Parser};
 #[derive(Parser)]
 #[clap(group(
     ArgGroup::new("input")
-        .args(&["path", "text"])
+        .args(&["path", "bytes"])
 ))]
 struct Cli {
     #[arg(short, long, value_name = "FILE")]
@@ -75,6 +77,9 @@ struct Cli {
 
     #[arg(short, long, value_name = "BYTES")]
     bytes: Option<Vec<u8>>,
+
+    #[arg(short, long, value_name = "FILE_MAP_PATH")]
+    file_map_path: Option<PathBuf>,
 }
 
 fn main() -> wasmtime::Result<()> {
@@ -97,6 +102,14 @@ fn main() -> wasmtime::Result<()> {
         unreachable!()
     };
 
+    let file_map = cli
+        .file_map_path
+        .map(|p| {
+            serde_json::from_slice::<Vec<PathBuf>>(&fs::read(p).map_err(wasmtime::Error::new)?)
+                .map_err(wasmtime::Error::new)
+        })
+        .map_or(Ok(None), |v| v.map(Some))?;
+
     let engine = Engine::default();
 
     let mut linker = component::Linker::<MyState>::new(&engine);
@@ -110,16 +123,20 @@ fn main() -> wasmtime::Result<()> {
             ctx: wasi,
             table: ResourceTable::new(),
             counters: Vec::new(),
+            src_map: SrcLineMap::new(),
+            file_map,
         },
     );
 
-    linker
-        .root()
-        .func_wrap("inc-counter", |mut store, args: (i32, i32, i32)| {
-            let (idx, ty, line_num) = (
+    linker.root().func_wrap(
+        "inc-counter",
+        |mut store, args: (i32, i32, i32, i32, i32)| {
+            let (idx, ty, file_idx, line_num, col_num) = (
                 args.0 as usize,
                 CounterType::from_i32(args.1).unwrap(),
-                args.1,
+                args.2,
+                args.3,
+                args.4,
             );
             let counters = &mut store.data_mut().counters;
             if counters.len() <= idx {
@@ -129,16 +146,22 @@ fn main() -> wasmtime::Result<()> {
                 );
             }
             store.data_mut().src_map.add_to_line(line_num as u64);
+            let file = if let Some(file_map) = &store.data().file_map {
+                Box::new(file_map[file_idx as usize].display()) as Box<dyn Display>
+            } else {
+                Box::new(format!("IDX#{}", file_idx)) as Box<dyn Display>
+            };
             println!(
                 "{} {} {} {} {}",
                 "RUNNER HOST:".red(),
                 format!("Accessed idx #{}, type:", idx).dimmed(),
                 format!("%{}", ty).green(),
                 format!(", source line number:").dimmed(),
-                format!("@{}", line_num).yellow(),
+                format!("@{}:{}:{}", file, line_num, col_num).yellow(),
             );
             Ok(())
-        })?;
+        },
+    )?;
 
     let component = Component::new(&engine, &bytes)?;
 

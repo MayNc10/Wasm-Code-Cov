@@ -1,9 +1,8 @@
 use core::{panic, str};
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path;
+use std::path::{self, PathBuf};
 
-use gimli::write::Attribute;
-use gimli::{AttributeValue, DebugAbbrev, DebugInfo, DebugLine, DwAt, Reader};
 use regex::Regex;
 use wast::core::{Custom, ExportKind, Func, Instruction, ModuleField};
 use wast::parser::{parse, ParseBuffer};
@@ -11,66 +10,24 @@ use wast::token::{Index, Span};
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
+use crate::debug::{find_code_offsets, read_dbg_info, WatLineMapper};
 use crate::offset_tracker::OffsetTracker;
+use crate::utils::*;
 use crate::CounterType;
 
 const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
+const BINARY_OFFSET_REGEX_STR: &str = r"\(;@(?P<hex>[0-9a-f]+)\s*;\)";
 const INC_FUNC_NAME: &str = "inc-counter";
 const INC_MODULE_NAME: &str = "inc-counter-module";
 // Is there a good way to ensure that these are always compatible? maybe a macro
 const INC_FUNC_DESC_COMP: &str =
-    "(param \"idx\" s32) (param \"type\" s32) (param \"line-num\" s32)";
-const INC_FUNC_DESC_CORE: &str = "(param i32) (param i32) (param i32)";
+    "(param \"idx\" s32) (param \"type\" s32) (param \"file-idx\" s32) (param \"line-num\" s32) (param \"column\" s32)";
+const INC_FUNC_DESC_CORE: &str = "(param i32) (param i32) (param i32) (param i32) (param i32)";
 
-fn get_span(f: &ComponentField) -> Option<Span> {
-    match f {
-        ComponentField::CoreModule(cm) => Some(cm.span),
-        ComponentField::CoreInstance(ci) => Some(ci.span),
-        ComponentField::CoreType(ct) => Some(ct.span),
-        ComponentField::Component(nc) => Some(nc.span),
-        ComponentField::Instance(i) => Some(i.span),
-        ComponentField::Alias(a) => Some(a.span),
-        ComponentField::Type(t) => Some(t.span),
-        ComponentField::CanonicalFunc(cf) => Some(cf.span),
-        ComponentField::CoreFunc(cf) => Some(cf.span),
-        ComponentField::Func(f) => Some(f.span),
-        ComponentField::Start(_s) => None,
-        ComponentField::Import(ci) => Some(ci.span),
-        ComponentField::Export(ce) => Some(ce.span),
-        ComponentField::Custom(c) => Some(c.span),
-        ComponentField::Producers(_p) => None,
-    }
-}
-
-fn get_module_span(f: &ModuleField) -> Option<Span> {
-    match f {
-        ModuleField::Type(f) => Some(f.span),
-        ModuleField::Rec(f) => Some(f.span),
-        ModuleField::Import(f) => Some(f.span),
-        ModuleField::Func(f) => Some(f.span),
-        ModuleField::Table(f) => Some(f.span),
-        ModuleField::Memory(f) => Some(f.span),
-        ModuleField::Global(f) => Some(f.span),
-        ModuleField::Export(f) => Some(f.span),
-        ModuleField::Start(_) => None,
-        ModuleField::Elem(f) => Some(f.span),
-        ModuleField::Data(f) => Some(f.span),
-        ModuleField::Tag(f) => Some(f.span),
-        ModuleField::Custom(_) => None,
-    }
-}
-
-pub fn get_fields<'a, 'b: 'a>(comp: &'b Wat<'a>) -> Option<&'a Vec<ComponentField<'a>>> {
-    match comp {
-        Wat::Module(_) => None,
-        Wat::Component(comp) => match &comp.kind {
-            ComponentKind::Binary(_) => None,
-            ComponentKind::Text(v) => Some(v),
-        },
-    }
-}
-
-pub fn add_scaffolding(wat_text: String) -> parser::Result<String> {
+pub fn add_scaffolding(
+    wat_text: String,
+    binary: Option<Cow<[u8]>>,
+) -> parser::Result<(String, Vec<PathBuf>)> {
     // Things to do: (in order)
     // Add import statement for the inc counter function (in type and import section)
     // Add import statements within each module
@@ -86,14 +43,32 @@ pub fn add_scaffolding(wat_text: String) -> parser::Result<String> {
     let wat = parse::<Wat>(buf)?;
     let mut total_increment = OffsetTracker::new();
 
-    read_dbg_info(&wat, &wat_text)?;
+    let binary = if binary.is_some() {
+        binary.unwrap()
+    } else {
+        Cow::Owned(parse::<Wat>(&ParseBuffer::new(&wat_text)?)?.encode()?)
+    };
+
+    let mut wat_mapper = WatLineMapper::new(
+        find_code_offsets(&binary)
+            .map_err(|_| Error::new(wat.span(), "Error reading binary file".to_string()))?,
+    );
+    read_dbg_info(&wat, &wat_text, &mut wat_mapper)?;
+
     add_inc_import_section(&wat, &mut output, &mut total_increment)?;
     add_imports_in_module(&wat, &mut output, &mut total_increment)?;
     {
         let bl = bump_core_func_idxs(&wat, &mut output, &mut total_increment)?;
         // process blacklisted functions
         let bl = process_blacklist(&wat, bl)?;
-        add_func_calls(&wat, &mut output, &mut total_increment, bl)?;
+        add_func_calls(
+            &wat,
+            &mut output,
+            &mut total_increment,
+            bl,
+            &wat_mapper,
+            &wat_text,
+        )?;
     }
 
     bump_instance_idxs(&wat, &mut output, &mut total_increment)?;
@@ -102,7 +77,7 @@ pub fn add_scaffolding(wat_text: String) -> parser::Result<String> {
     add_instantiaion_arg(&wat, &mut output, &mut total_increment)?;
     //panic!("erm.. what the bug");
     add_canon_lower_and_instance(&wat, &mut output, &mut total_increment)?;
-    Ok(output)
+    Ok((output, wat_mapper.into_file_map()))
 }
 
 pub fn add_inc_import_section(
@@ -186,8 +161,12 @@ pub fn add_func_calls<'a>(
     output: &mut String,
     total_increment: &mut OffsetTracker,
     blacklist: Vec<(Index<'a>, &'a Func<'a>)>,
+    map: &WatLineMapper,
+    text: &str,
 ) -> parser::Result<()> {
     let mut counter_idx = 0;
+    let mut inline_mod_idx = 0;
+    let binary_offset_re = Regex::new(BINARY_OFFSET_REGEX_STR).unwrap();
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -229,12 +208,34 @@ pub fn add_func_calls<'a>(
                                             Instruction::Loop(_) => CounterType::Loop,
                                             _ => unreachable!(),
                                         };
-                                        let line_num = 0; // hard coded
+                                        // find binary offset of this instruction
+                                        // this could be much more efficient
+                                        let line = str::from_utf8(
+                                            &text.as_bytes()[..=spans[idx].offset()],
+                                        )
+                                        .unwrap()
+                                        .split('\n')
+                                        .next_back()
+                                        .unwrap();
+
+                                        let hex = binary_offset_re
+                                            .captures(line)
+                                            .unwrap()
+                                            .name("hex")
+                                            .unwrap()
+                                            .as_str();
+                                        let offset = u64::from_str_radix(hex, 16).unwrap();
+
+                                        let src_trip = map
+                                            .get_source_triplet(inline_mod_idx, offset)
+                                            .map_or((0, 0, 0), |info| {
+                                                (info.path_idx, info.line, info.column)
+                                            });
 
                                         // insert line here
                                         let msg = format!(
-                                            "i32.const {} i32.const {} i32.const {} call ${}\n",
-                                            counter_idx, ty as i32, line_num, INC_FUNC_NAME
+                                            "i32.const {} i32.const {} i32.const {} i32.const {} i32.const {} call ${}\n",
+                                            counter_idx, ty as i32, src_trip.0, src_trip.1, src_trip.2, INC_FUNC_NAME
                                         );
                                         counter_idx += 1;
 
@@ -250,6 +251,7 @@ pub fn add_func_calls<'a>(
                         }
                     }
                 }
+                inline_mod_idx += 1;
             }
         }
     }
@@ -813,114 +815,5 @@ pub fn add_canon_lower_and_instance(
     let msg = format!("{}\n{}\n", canon_lower, instantiate);
     total_increment.add_to_string(output, offset, &msg);
 
-    Ok(())
-}
-
-pub fn read_dbg_info(wat: &Wat, text: &str) -> parser::Result<()> {
-    for field in get_fields(&wat).ok_or(Error::new(
-        wat.span(),
-        "Input WAT file could not be parsed (may be binary or module)".to_string(),
-    ))? {
-        if let ComponentField::CoreModule(m) = field {
-            if let CoreModuleKind::Inline { fields } = &m.kind {
-                let mut section_map = HashMap::new();
-                let mut code_section_start = None;
-                for field in fields {
-                    if let ModuleField::Custom(c) = field {
-                        if let Custom::Raw(c) = c {
-                            let flattened_slice: Vec<u8> =
-                                c.data.iter().map(|a| Vec::from(*a)).flatten().collect(); // is there a way to do this without allocating?
-                            section_map.insert(c.name, flattened_slice);
-                        }
-                    } else if let ModuleField::Func(f) = field {
-                        code_section_start = Some(f.span.offset())
-                    }
-                }
-                let dwarf_sections = gimli::DwarfSections::load(|sec| {
-                    Ok(section_map
-                        .get(sec.name())
-                        .map(|v| v.as_slice())
-                        .unwrap_or(Default::default()))
-                })?;
-                let dwarf = dwarf_sections
-                    .borrow(|section| gimli::EndianSlice::new(section, gimli::LittleEndian));
-                let mut iter = dwarf.units();
-                while let Some(header) = iter.next().unwrap() {
-                    eprintln!(
-                        "Unit at <.debug_info+0x{:x}>",
-                        header.offset().as_debug_info_offset().unwrap().0
-                    );
-                    let unit = dwarf.unit(header).unwrap();
-                    let unit = unit.unit_ref(&dwarf);
-
-                    if let Some(program) = unit.line_program.clone() {
-                        let comp_dir = if let Some(ref dir) = unit.comp_dir {
-                            path::PathBuf::from(dir.to_string_lossy().into_owned())
-                        } else {
-                            path::PathBuf::new()
-                        };
-
-                        // Iterate over the line program rows.
-                        let mut rows = program.rows();
-                        while let Some((header, row)) = rows.next_row().unwrap() {
-                            if row.end_sequence() {
-                                // End of sequence indicates a possible gap in addresses.
-                                eprintln!("{:x} end-sequence", row.address());
-                            } else {
-                                // Determine the path. Real applications should cache this for performance.
-                                let mut path = path::PathBuf::new();
-                                if let Some(file) = row.file(header) {
-                                    path.clone_from(&comp_dir);
-
-                                    // The directory index 0 is defined to correspond to the compilation unit directory.
-                                    if file.directory_index() != 0 {
-                                        if let Some(dir) = file.directory(header) {
-                                            path.push(
-                                                unit.attr_string(dir)
-                                                    .unwrap()
-                                                    .to_string_lossy()
-                                                    .as_ref(),
-                                            );
-                                        }
-                                    }
-
-                                    path.push(
-                                        unit.attr_string(file.path_name())
-                                            .unwrap()
-                                            .to_string_lossy()
-                                            .as_ref(),
-                                    );
-                                }
-
-                                // Determine line/column. DWARF line/column is never 0, so we use that
-                                // but other applications may want to display this differently.
-                                let line = match row.line() {
-                                    Some(line) => line.get(),
-                                    None => 0,
-                                };
-                                let column = match row.column() {
-                                    gimli::ColumnType::LeftEdge => 0,
-                                    gimli::ColumnType::Column(column) => column.get(),
-                                };
-                                let text_offset = row.address() as usize + m.span.offset();
-                                //eprintln!("{:x}", text_offset);
-                                //panic!();
-
-                                eprintln!(
-                                    "{:x} (%{:?}) {}:{}:{}",
-                                    row.address(),
-                                    str::from_utf8(&text.as_bytes()[text_offset..text_offset + 10]),
-                                    path.display(),
-                                    line,
-                                    column
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    panic!("erm ... what the bug");
     Ok(())
 }

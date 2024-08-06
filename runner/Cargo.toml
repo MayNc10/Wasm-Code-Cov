@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 clap = { workspace = true }
 colored = "2.0.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = "22.0.0"
 wat-annotator = { path = "../wat-annotator" }

@@ -1,7 +1,9 @@
 use std::fmt::Display;
 
 pub mod annotate;
+pub mod debug;
 pub mod offset_tracker;
+pub mod utils;
 
 #[repr(i32)]
 pub enum CounterType {

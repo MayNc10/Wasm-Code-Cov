@@ -1,3 +1,7 @@
 [workspace]
 members = ["wat-annotator", "example-component", "runner"]
 resolver = "1"
+
+[workspace.dependencies]
+clap = { version = "4.5.8", features = ["derive"] }
+wasmtime = { version = "22.0.0", features = ["runtime", "component-model"] }

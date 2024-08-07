@@ -1,18 +1,19 @@
 use colored::Colorize;
 use component::{Component, ResourceTable};
-use runner::gcov::SrcLineMap;
+use runner::gcov::GCovFile;
 use wasmtime::*;
 use wasmtime_wasi::{
     bindings::sync::exports::wasi::cli::run::Guest, WasiCtx, WasiCtxBuilder, WasiView,
 };
+use wat_annotator::data::DebugData;
 use wat_annotator::CounterType;
 
 struct MyState {
     ctx: WasiCtx,
     table: ResourceTable,
     counters: Vec<i32>,
-    src_map: SrcLineMap,
-    file_map: Option<Vec<PathBuf>>,
+    debug_data: Option<DebugData>,
+    gcov_files: Option<HashMap<PathBuf, GCovFile>>,
 }
 
 impl WasiView for MyState {
@@ -61,6 +62,7 @@ impl<T: Copy + Clone> Iterator for ConstantIterator<T> {
     }
 }
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::{fs, io};
 use std::{io::Read, path::PathBuf};
@@ -79,7 +81,7 @@ struct Cli {
     bytes: Option<Vec<u8>>,
 
     #[arg(short, long, value_name = "FILE_MAP_PATH")]
-    file_map_path: Option<PathBuf>,
+    data_path: Option<PathBuf>,
 }
 
 fn main() -> wasmtime::Result<()> {
@@ -103,12 +105,15 @@ fn main() -> wasmtime::Result<()> {
     };
 
     let file_map = cli
-        .file_map_path
+        .data_path
         .map(|p| {
-            serde_json::from_slice::<Vec<PathBuf>>(&fs::read(p).map_err(wasmtime::Error::new)?)
-                .map_err(wasmtime::Error::new)
+            serde_json::from_slice::<wat_annotator::data::DebugData>(
+                &fs::read(p).map_err(wasmtime::Error::new)?,
+            )
+            .map_err(wasmtime::Error::new)
         })
         .map_or(Ok(None), |v| v.map(Some))?;
+    let gcov_files = file_map.as_ref().map(|_| HashMap::new());
 
     let engine = Engine::default();
 
@@ -123,8 +128,8 @@ fn main() -> wasmtime::Result<()> {
             ctx: wasi,
             table: ResourceTable::new(),
             counters: Vec::new(),
-            src_map: SrcLineMap::new(),
-            file_map,
+            debug_data: file_map,
+            gcov_files,
         },
     );
 
@@ -145,9 +150,10 @@ fn main() -> wasmtime::Result<()> {
                         .into_iter(),
                 );
             }
-            store.data_mut().src_map.add_to_line(line_num as u64);
-            let file = if let Some(file_map) = &store.data().file_map {
-                Box::new(file_map[file_idx as usize].display()) as Box<dyn Display>
+            if let Some(map) = store.data_mut().gcov_files.as_mut() {}
+
+            let file = if let Some(debug_data) = &store.data().debug_data {
+                Box::new(debug_data.file_map[file_idx as usize].display()) as Box<dyn Display>
             } else {
                 Box::new(format!("IDX#{}", file_idx)) as Box<dyn Display>
             };

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
@@ -23,8 +23,8 @@ struct Cli {
     #[arg(short, long, value_name = "BINARY_FILE")]
     binary_path: Option<PathBuf>,
 
-    #[arg(short, long, value_name = "FILE_MAP_OUTPUT_PATH")]
-    file_map_output_path: Option<PathBuf>,
+    #[arg(short, long, value_name = "DATA_OUTPUT_PATH")]
+    data_output_path: Option<PathBuf>,
 }
 
 fn main() -> io::Result<()> {
@@ -39,15 +39,10 @@ fn main() -> io::Result<()> {
 
     let (output, file_map) = add_scaffolding(
         cli.text.unwrap(),
-        cli.binary_path.map(|p| {
-            let mut buffer = Vec::new();
-            let mut stdin = io::stdin();
-            stdin.read_to_end(&mut buffer).unwrap();
-            Cow::Owned(buffer)
-        }),
+        cli.binary_path.map(|p| Cow::Owned(fs::read(p).unwrap())),
     )
     .unwrap();
-    if let Some(path) = cli.file_map_output_path {
+    if let Some(path) = cli.data_output_path {
         let mut f = File::create(path).unwrap();
         write!(f, "{}", serde_json::to_string(&file_map).unwrap()).unwrap();
     }

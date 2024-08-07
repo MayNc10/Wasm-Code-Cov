@@ -10,6 +10,7 @@ use wast::token::{Index, Span};
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
+use crate::data::DebugData;
 use crate::debug::{find_code_offsets, read_dbg_info, WatLineMapper};
 use crate::offset_tracker::OffsetTracker;
 use crate::utils::*;
@@ -27,7 +28,7 @@ const INC_FUNC_DESC_CORE: &str = "(param i32) (param i32) (param i32) (param i32
 pub fn add_scaffolding(
     wat_text: String,
     binary: Option<Cow<[u8]>>,
-) -> parser::Result<(String, Vec<PathBuf>)> {
+) -> parser::Result<(String, DebugData)> {
     // Things to do: (in order)
     // Add import statement for the inc counter function (in type and import section)
     // Add import statements within each module
@@ -77,7 +78,7 @@ pub fn add_scaffolding(
     add_instantiaion_arg(&wat, &mut output, &mut total_increment)?;
     //panic!("erm.. what the bug");
     add_canon_lower_and_instance(&wat, &mut output, &mut total_increment)?;
-    Ok((output, wat_mapper.into_file_map()))
+    Ok((output, wat_mapper.into_debug_data()))
 }
 
 pub fn add_inc_import_section(

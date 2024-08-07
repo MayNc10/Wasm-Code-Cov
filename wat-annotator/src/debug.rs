@@ -14,6 +14,7 @@ use wast::{
     Error,
 };
 
+use crate::data::DebugData;
 use crate::utils::*;
 
 #[derive(Serialize, Deserialize)]
@@ -58,8 +59,26 @@ impl WatLineMapper {
             .filter(|info| info.code_module_idx == inline_module_idx && info.address <= pc_offset)
             .next_back()
     }
-    pub fn into_file_map(self) -> Vec<path::PathBuf> {
-        self.file_map
+    pub fn into_debug_data(self) -> DebugData {
+        let mut blocks_per_line = Vec::new();
+        self.lines
+            .into_iter()
+            .map(|dli| dli.line)
+            .for_each(|this_line| {
+                if let Some(pos) = blocks_per_line
+                    .iter()
+                    .map(|(line, _)| line)
+                    .position(|line| *line == this_line)
+                {
+                    blocks_per_line[pos] = (this_line, blocks_per_line[pos].1 + 1);
+                } else {
+                    blocks_per_line.push((this_line, 1));
+                }
+            });
+        DebugData {
+            file_map: self.file_map,
+            blocks_per_line,
+        }
     }
 }
 

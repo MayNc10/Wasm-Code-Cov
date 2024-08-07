@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 pub mod annotate;
+pub mod data;
 pub mod debug;
 pub mod offset_tracker;
 pub mod utils;

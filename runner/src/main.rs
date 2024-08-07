@@ -82,6 +82,9 @@ struct Cli {
 
     #[arg(short, long, value_name = "FILE_MAP_PATH")]
     data_path: Option<PathBuf>,
+    // make this require data path
+    #[arg(short, long, value_name = "OUTPUT_FILES")]
+    output_files: Option<Vec<PathBuf>>,
 }
 
 fn main() -> wasmtime::Result<()> {
@@ -150,7 +153,17 @@ fn main() -> wasmtime::Result<()> {
                         .into_iter(),
                 );
             }
-            if let Some(map) = store.data_mut().gcov_files.as_mut() {}
+            let data = store.data_mut();
+            if let Some(map) = data.gcov_files.as_mut() {
+                let debug_data = data.debug_data.as_ref().unwrap();
+                let path = &debug_data.file_map[file_idx as usize];
+                if !map.contains_key(path) {
+                    map.insert(path.clone(), GCovFile::new(path.clone(), &debug_data));
+                }
+                let gcov_file = map.get_mut(path).unwrap();
+                gcov_file.increment(line_num as u64, col_num as u64);
+            }
+            drop(data);
 
             let file = if let Some(debug_data) = &store.data().debug_data {
                 Box::new(debug_data.file_map[file_idx as usize].display()) as Box<dyn Display>
@@ -180,5 +193,19 @@ fn main() -> wasmtime::Result<()> {
 
     guest
         .call_run(&mut store)?
-        .map_err(|_| wasmtime::Error::msg("running code returned error"))
+        .map_err(|_| wasmtime::Error::msg("running code returned error"))?;
+
+    if let Some(outputs) = cli.output_files {
+        for file in outputs {
+            if let Some(gcov) = store.data().gcov_files.as_ref().unwrap().get(&file) {
+                println!("{}:\n{}", file.display(), gcov);
+            } else {
+                eprintln!(
+                    "Requested output file not found in source files! Requested file: {}, source files: {:?}",
+                    file.display(), store.data().gcov_files.as_ref().unwrap().keys()
+                );
+            }
+        }
+    }
+    Ok(())
 }

@@ -4,15 +4,13 @@ mod bindings;
 fn fizzbuzz(num: u32) -> String {
     if num % 3 == 0 && num % 5 == 0 {
         "fizz buzz".into()
-    }
-    else if num % 3 == 0 {
+    } else if num % 3 == 0 {
         "fizz".into()
-    }
-    else if num % 5 == 0 {
+    } else if num % 5 == 0 {
         "buzz".into()
+    } else {
+        num.to_string()
     }
-    else { num.to_string() }
-
 }
 
 fn main() {

@@ -69,19 +69,24 @@ impl WatLineMapper {
     }
     /// Consumes this struct and returns a `DebugData` struct representing information that should be passed to other programs
     pub fn into_debug_data(self) -> DebugData {
-        let mut blocks_per_line = Vec::new();
+        let mut blocks_per_line: HashMap<usize, Vec<_>> = HashMap::new();
         self.lines
             .into_iter()
-            .map(|dli| dli.line)
-            .for_each(|this_line| {
-                if let Some(pos) = blocks_per_line
-                    .iter()
-                    .map(|(line, _)| line)
-                    .position(|line| *line == this_line)
-                {
-                    blocks_per_line[pos] = (this_line, blocks_per_line[pos].1 + 1);
+            .map(|dli| (dli.path_idx, dli.line))
+            .for_each(|(path_idx, this_line)| {
+                if let Some(Some(pos)) = blocks_per_line.get_mut(&path_idx).map(|v| {
+                    v.iter()
+                        .map(|(line, _)| line)
+                        .position(|line| *line == this_line)
+                }) {
+                    blocks_per_line.get_mut(&path_idx).unwrap()[pos] = (
+                        this_line,
+                        blocks_per_line.get(&path_idx).unwrap()[pos].1 + 1,
+                    );
+                } else if let Some(v) = blocks_per_line.get_mut(&path_idx) {
+                    v.push((this_line, 1));
                 } else {
-                    blocks_per_line.push((this_line, 1));
+                    blocks_per_line.insert(path_idx, vec![(this_line, 1)]);
                 }
             });
         DebugData {

@@ -70,8 +70,8 @@ pub struct GCovFile {
 impl GCovFile {
     /// Create a new GCov file representing the source code in `src_file`
     pub fn new(src_file: Arc<PathBuf>, data: &DebugDataArc) -> GCovFile {
-        let counters = data
-            .blocks_per_line
+        let counters = data.blocks_per_line
+            [&data.file_map.iter().position(|p| *p == src_file).unwrap()]
             .iter()
             .map(|(idx, count)| (*idx, (Line::empty(), *count)))
             .collect();

@@ -1,4 +1,4 @@
-use std::{path, sync::Arc};
+use std::{collections::HashMap, path, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,7 @@ pub struct DebugData {
     /// Maps indices to file paths
     pub file_map: Vec<path::PathBuf>,
     /// Contains the number of blocks in a specific line of code
-    pub blocks_per_line: Vec<(u64, u64)>, // stores the number of blocks at a specific line of code, needed for knowing if some blocks on a line weren't covered
+    pub blocks_per_line: HashMap<usize, Vec<(u64, u64)>>, // maps file indxs to lines and number of counters
 }
 
 /// Like `DebugData`, but with an `Arc` wrapper around the paths to prevent excessive cloning
@@ -16,7 +16,7 @@ pub struct DebugDataArc {
     /// Maps indices to file paths
     pub file_map: Vec<Arc<path::PathBuf>>,
     /// Contains the number of blocks in a specific line of code
-    pub blocks_per_line: Vec<(u64, u64)>, // stores the number of blocks at a specific line of code, needed for knowing if some blocks on a line weren't covered
+    pub blocks_per_line: HashMap<usize, Vec<(u64, u64)>>, // maps file indxs to lines and number of counters
 }
 
 impl From<DebugData> for DebugDataArc {

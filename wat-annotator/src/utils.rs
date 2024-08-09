@@ -5,6 +5,7 @@ use wast::{
     Wat,
 };
 
+/// Get the span of a component field, if avaliable
 pub fn get_span(f: &ComponentField) -> Option<Span> {
     match f {
         ComponentField::CoreModule(cm) => Some(cm.span),
@@ -25,6 +26,7 @@ pub fn get_span(f: &ComponentField) -> Option<Span> {
     }
 }
 
+/// Get the span of a module field, if avaliable
 pub fn get_module_span(f: &ModuleField) -> Option<Span> {
     match f {
         ModuleField::Type(f) => Some(f.span),
@@ -43,6 +45,7 @@ pub fn get_module_span(f: &ModuleField) -> Option<Span> {
     }
 }
 
+/// Get the fields of a Wat component, if avaliable
 pub fn get_fields<'a, 'b: 'a>(comp: &'b Wat<'a>) -> Option<&'a Vec<ComponentField<'a>>> {
     match comp {
         Wat::Module(_) => None,

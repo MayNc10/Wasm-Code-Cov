@@ -4,7 +4,6 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Parser};
-use serde::Serialize;
 
 use wat_annotator::annotate::add_scaffolding;
 

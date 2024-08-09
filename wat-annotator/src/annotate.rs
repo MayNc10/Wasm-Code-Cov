@@ -1,12 +1,10 @@
-use core::{panic, str};
+use core::str;
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::path::{self, PathBuf};
 
 use regex::Regex;
-use wast::core::{Custom, ExportKind, Func, Instruction, ModuleField};
+use wast::core::{ExportKind, Func, Instruction, ModuleField};
 use wast::parser::{parse, ParseBuffer};
-use wast::token::{Index, Span};
+use wast::token::Index;
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
@@ -25,6 +23,8 @@ const INC_FUNC_DESC_COMP: &str =
     "(param \"idx\" s32) (param \"type\" s32) (param \"file-idx\" s32) (param \"line-num\" s32) (param \"column\" s32)";
 const INC_FUNC_DESC_CORE: &str = "(param i32) (param i32) (param i32) (param i32) (param i32)";
 
+/// Accepts the text of a Wat file (and optionally the bytes of a binary Wasm file), and outputs a modified Wat file, as well as some debugging information
+/// If the binary file is not provided, this function will compile it from the Wat tezt (this adds extra time)
 pub fn add_scaffolding(
     wat_text: String,
     binary: Option<Cow<[u8]>>,
@@ -81,6 +81,7 @@ pub fn add_scaffolding(
     Ok((output, wat_mapper.into_debug_data()))
 }
 
+/// Adds the instructions that import the host functions
 pub fn add_inc_import_section(
     wat: &Wat,
     output: &mut String,
@@ -114,6 +115,7 @@ pub fn add_inc_import_section(
     Ok(())
 }
 
+/// Adds function imports to each inline module
 pub fn add_imports_in_module(
     wat: &Wat,
     output: &mut String,
@@ -157,6 +159,9 @@ pub fn add_imports_in_module(
     Ok(())
 }
 
+/// Adds function calls to control flow instructions
+/// The blacklist argument specifies functions that should not have calls inserted
+/// This is mostly used to ensure that `realloc` functions don't call other functions outside their instances, which is an error in Webassembly
 pub fn add_func_calls<'a>(
     wat: &'a Wat,
     output: &mut String,
@@ -260,6 +265,7 @@ pub fn add_func_calls<'a>(
     Ok(())
 }
 
+/// Increase all instance indices to ensure they point to the correct instances
 pub fn bump_instance_idxs(
     wat: &Wat,
     output: &mut String,
@@ -318,6 +324,7 @@ pub fn bump_instance_idxs(
     Ok(())
 }
 
+/// Increase all component function indices to ensure they point to the correct functions
 pub fn bump_comp_func_idxs(
     wat: &Wat,
     output: &mut String,
@@ -407,6 +414,7 @@ pub fn bump_comp_func_idxs(
     Ok(())
 }
 
+/// Increase all core function indices to ensure they point to the correct functions
 pub fn bump_core_func_idxs<'a, 'b: 'a, 'c>(
     wat: &'b Wat,
     output: &'c mut String,
@@ -450,6 +458,11 @@ pub fn bump_core_func_idxs<'a, 'b: 'a, 'c>(
     Ok(bl)
 }
 
+/// Take an initial function blacklist and extend it
+/// Functions are blacklisted because they should not make external calls
+/// This also means that functions they call should *also* not make external calls
+/// This function adds functions to the blacklist if they are called by blacklisted functions
+/// This happens recursively until all blacklisted functions are listed
 pub fn process_blacklist<'a, 'b: 'a>(
     wat: &'a Wat,
     blacklist: Vec<Index<'a>>,
@@ -615,6 +628,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
     Ok(blacklist)
 }
 
+/// Given a blacklist of export indices, map them to a blacklist of indices and functio names
 fn map_idx_to_module<'a, 'b: 'a>(
     wat: &'a Wat,
     blacklist: Vec<Index<'a>>,
@@ -674,6 +688,7 @@ fn map_idx_to_module<'a, 'b: 'a>(
     Ok(out)
 }
 
+/// Increase all type indices to ensure they point to the correct types
 pub fn bump_type_idxs(
     wat: &Wat,
     output: &mut String,
@@ -752,6 +767,7 @@ pub fn bump_type_idxs(
     Ok(())
 }
 
+/// Add the wrapper instance to the instatiation calls of all other instances
 pub fn add_instantiaion_arg(
     wat: &Wat,
     output: &mut String,
@@ -785,6 +801,7 @@ pub fn add_instantiaion_arg(
     Ok(())
 }
 
+/// Ad the functions to lower the imported function and wrap it in an instance
 pub fn add_canon_lower_and_instance(
     wat: &Wat,
     output: &mut String,

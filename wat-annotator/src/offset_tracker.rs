@@ -6,17 +6,13 @@ use wast::token::Index;
 type Location = usize;
 type Offset = usize;
 
+/// A struct for tracking modifications to a file to map offsets between the original and modified versions
 pub struct OffsetTracker {
     offsets: Vec<(Location, Offset)>,
 }
 
-// TODO
-// Currently we implement things by counting by index
-// and preserving the order of the offsets
-// but if we used filter iterators like in the slice fn
-// Then we dont have to preserve order
-// change this!
 impl OffsetTracker {
+    /// create a new `OffsetTracker`
     pub fn new() -> OffsetTracker {
         OffsetTracker {
             offsets: Vec::new(),
@@ -35,6 +31,7 @@ impl OffsetTracker {
 
     // Should somehow link this struct to specific string
     // TODO!
+    /// Insert a string `msg` into another string `s` at position `original_loc`
     pub fn add_to_string(&mut self, s: &mut String, original_loc: Location, msg: &str) {
         let loc = self.get_real_loc(original_loc);
         s.insert_str(loc, msg);
@@ -43,6 +40,7 @@ impl OffsetTracker {
 
     // I feel kinda gross putting very implementation specific code here, but like
     // idk
+    /// Increment a specific `Index`, with a lower bound to control whether the index should be increased or not
     pub fn increment_idx(&mut self, output: &mut String, idx: Index, lower_bound: Option<u32>) {
         match idx {
             Index::Num(num, _) => {
@@ -66,6 +64,8 @@ impl OffsetTracker {
         }
     }
 
+    /// Match a regex against a modified string, and use the regex information to change the string
+    /// The provided function should take in the string, the start of the match, and the end of the match, and should return a (location, offset) tuple telling the tracker how the string was modified
     pub fn modify_with_regex_match<F>(
         &mut self,
         output: &mut String,
@@ -85,6 +85,7 @@ impl OffsetTracker {
         }
     }
 
+    /// Slice the string `output` starting at `start`
     pub fn get_slice_from<'a>(&self, output: &'a String, start: Location) -> &'a str {
         let loc = start
             + self

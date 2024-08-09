@@ -1,4 +1,8 @@
+//! Runner Binary
+//! This binary provides commands to run a modified wasm file and extract debug information to calculate code coverage with
+
 #![warn(missing_docs)]
+
 use colored::Colorize;
 use component::{Component, ResourceTable};
 use runner::gcov::GCovFile;
@@ -6,7 +10,7 @@ use wasmtime::*;
 use wasmtime_wasi::{
     bindings::sync::exports::wasi::cli::run::Guest, WasiCtx, WasiCtxBuilder, WasiView,
 };
-use wat_annotator::data::{DebugData, DebugDataArc};
+use wat_annotator::data::DebugDataArc;
 use wat_annotator::CounterType;
 
 struct MyState {
@@ -65,7 +69,6 @@ impl<T: Copy + Clone> Iterator for ConstantIterator<T> {
 
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::{fs, io};
 use std::{io::Read, path::PathBuf};

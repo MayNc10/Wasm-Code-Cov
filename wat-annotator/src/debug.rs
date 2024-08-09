@@ -2,31 +2,31 @@ use core::str;
 use std::collections::HashMap;
 use std::path;
 
-use gimli::write::Attribute;
-use gimli::{AttributeValue, DebugAbbrev, DebugInfo, DebugLine, DwAt, Reader};
 use serde::{Deserialize, Serialize};
-use wasmparser::{BinaryReaderError, Encoding, Parser, Payload::*};
-use wast::core::{Custom, ExportKind, Func, Instruction, ModuleField};
-use wast::token::{Index, Span};
+use wasmparser::{BinaryReaderError, Parser, Payload::*};
+use wast::core::{Custom, ModuleField};
 use wast::{component::*, Wat};
-use wast::{
-    parser::{self, parse, ParseBuffer},
-    Error,
-};
+use wast::{parser, Error};
 
 use crate::data::DebugData;
 use crate::utils::*;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
+/// This struct represents debugging infomation about a specific line of Wasm code
 pub struct DebugLineInfo {
+    /// The address within the `code` section of the module
     pub address: u64,
+    /// The index in the path table corresponding to the source file for this line
     pub path_idx: usize,
+    /// The source line
     pub line: u64,
+    /// The source column
     pub column: u64,
+    /// The index of the inline core module where the compiled code this represents is located
     pub code_module_idx: usize,
 }
 
-// TODO: rename lol
+/// This struct contains overall debugging information for a Webassembly file
 pub struct WatLineMapper {
     code_offsets: Vec<usize>,
     lines: Vec<DebugLineInfo>,
@@ -34,6 +34,7 @@ pub struct WatLineMapper {
 }
 
 impl WatLineMapper {
+    /// Create a new `WatLineMapper` from a list of offsets of code sections
     pub fn new(offsets: Vec<usize>) -> WatLineMapper {
         WatLineMapper {
             code_offsets: offsets,
@@ -41,6 +42,7 @@ impl WatLineMapper {
             file_map: Vec::new(),
         }
     }
+    /// Add a debug line
     pub fn add_line(&mut self, line: DebugLineInfo) {
         if !self.lines().contains(&line) {
             self.lines.push(line);
@@ -48,9 +50,11 @@ impl WatLineMapper {
             panic!("duplicate lines???");
         }
     }
+    /// Gets the all the currently held debug lines
     pub fn lines(&self) -> &Vec<DebugLineInfo> {
         &self.lines
     }
+    /// The function gets the source triplet (file, line, column) of an instruction in code, given
     /// The inline module idx is how many inline modules have been seen before this, and the binary offset is grabbed from the comments at the start of each line
     pub fn get_source_triplet(
         &self,
@@ -63,6 +67,7 @@ impl WatLineMapper {
             .filter(|info| info.code_module_idx == inline_module_idx && info.address <= pc_offset)
             .max_by(|i1, i2| i1.address.cmp(&i2.address))
     }
+    /// Consumes this struct and returns a `DebugData` struct representing information that should be passed to other programs
     pub fn into_debug_data(self) -> DebugData {
         let mut blocks_per_line = Vec::new();
         self.lines
@@ -86,6 +91,8 @@ impl WatLineMapper {
     }
 }
 
+/// Fill in a mapper struct with debug information contained in a Wat file
+/// The `text` argument should be the plaintext string that the `wat` argument was created from
 pub fn read_dbg_info(wat: &Wat, text: &str, map: &mut WatLineMapper) -> parser::Result<()> {
     let mut code_module_idx = 0;
     for field in get_fields(&wat).ok_or(Error::new(
@@ -208,6 +215,7 @@ pub fn read_dbg_info(wat: &Wat, text: &str, map: &mut WatLineMapper) -> parser::
     Ok(())
 }
 
+/// Find the code section offsets in a binary Wasm file
 pub fn find_code_offsets(input: &[u8]) -> Result<Vec<usize>, BinaryReaderError> {
     let mut code_offsets = Vec::new();
     for payload in Parser::new(0).parse_all(input) {

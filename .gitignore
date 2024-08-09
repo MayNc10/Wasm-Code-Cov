@@ -3,3 +3,6 @@ Cargo.lock
 *.json
 *.wat
 *.wasm
+*.wit
+changes.md
+dbg-notes.md

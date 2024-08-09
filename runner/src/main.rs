@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 use colored::Colorize;
 use component::{Component, ResourceTable};
 use runner::gcov::GCovFile;
@@ -5,15 +6,15 @@ use wasmtime::*;
 use wasmtime_wasi::{
     bindings::sync::exports::wasi::cli::run::Guest, WasiCtx, WasiCtxBuilder, WasiView,
 };
-use wat_annotator::data::DebugData;
+use wat_annotator::data::{DebugData, DebugDataArc};
 use wat_annotator::CounterType;
 
 struct MyState {
     ctx: WasiCtx,
     table: ResourceTable,
     counters: Vec<i32>,
-    debug_data: Option<DebugData>,
-    gcov_files: Option<HashMap<PathBuf, GCovFile>>,
+    debug_data: Option<DebugDataArc>,
+    gcov_files: Option<HashMap<Arc<PathBuf>, GCovFile>>,
 }
 
 impl WasiView for MyState {
@@ -64,6 +65,8 @@ impl<T: Copy + Clone> Iterator for ConstantIterator<T> {
 
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::{fs, io};
 use std::{io::Read, path::PathBuf};
 
@@ -131,7 +134,7 @@ fn main() -> wasmtime::Result<()> {
             ctx: wasi,
             table: ResourceTable::new(),
             counters: Vec::new(),
-            debug_data: file_map,
+            debug_data: file_map.map(Into::into),
             gcov_files,
         },
     );
@@ -163,7 +166,6 @@ fn main() -> wasmtime::Result<()> {
                 let gcov_file = map.get_mut(path).unwrap();
                 gcov_file.increment(line_num as u64, col_num as u64);
             }
-            drop(data);
 
             let file = if let Some(debug_data) = &store.data().debug_data {
                 Box::new(debug_data.file_map[file_idx as usize].display()) as Box<dyn Display>
@@ -197,7 +199,13 @@ fn main() -> wasmtime::Result<()> {
 
     if let Some(outputs) = cli.output_files {
         for file in outputs {
-            if let Some(gcov) = store.data().gcov_files.as_ref().unwrap().get(&file) {
+            if let Some(gcov) = store
+                .data()
+                .gcov_files
+                .as_ref()
+                .unwrap()
+                .get(&file.canonicalize().unwrap())
+            {
                 println!("{}:\n{}", file.display(), gcov);
             } else {
                 eprintln!(

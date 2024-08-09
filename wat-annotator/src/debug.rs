@@ -17,7 +17,7 @@ use wast::{
 use crate::data::DebugData;
 use crate::utils::*;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub struct DebugLineInfo {
     pub address: u64,
     pub path_idx: usize,
@@ -42,7 +42,11 @@ impl WatLineMapper {
         }
     }
     pub fn add_line(&mut self, line: DebugLineInfo) {
-        self.lines.push(line);
+        if !self.lines().contains(&line) {
+            self.lines.push(line);
+        } else {
+            panic!("duplicate lines???");
+        }
     }
     pub fn lines(&self) -> &Vec<DebugLineInfo> {
         &self.lines
@@ -57,7 +61,7 @@ impl WatLineMapper {
         self.lines
             .iter()
             .filter(|info| info.code_module_idx == inline_module_idx && info.address <= pc_offset)
-            .next_back()
+            .max_by(|i1, i2| i1.address.cmp(&i2.address))
     }
     pub fn into_debug_data(self) -> DebugData {
         let mut blocks_per_line = Vec::new();

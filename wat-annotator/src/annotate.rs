@@ -56,7 +56,7 @@ pub fn add_scaffolding(
     );
     read_dbg_info(&wat, &wat_text, &mut wat_mapper)?;
 
-    add_inc_import_section(&wat, &mut output, &mut total_increment)?;
+    let type_idx_bound = add_inc_import_section(&wat, &mut output, &mut total_increment)?;
     add_imports_in_module(&wat, &mut output, &mut total_increment)?;
     {
         let bl = bump_core_func_idxs(&wat, &mut output, &mut total_increment)?;
@@ -74,7 +74,7 @@ pub fn add_scaffolding(
 
     bump_instance_idxs(&wat, &mut output, &mut total_increment)?;
     bump_comp_func_idxs(&wat, &mut output, &mut total_increment)?;
-    bump_type_idxs(&wat, &mut output, &mut total_increment)?;
+    bump_type_idxs(&wat, &mut output, &mut total_increment, type_idx_bound)?;
     add_instantiaion_arg(&wat, &mut output, &mut total_increment)?;
     //panic!("erm.. what the bug");
     add_canon_lower_and_instance(&wat, &mut output, &mut total_increment)?;
@@ -86,9 +86,10 @@ pub fn add_inc_import_section(
     wat: &Wat,
     output: &mut String,
     total_increment: &mut OffsetTracker,
-) -> parser::Result<()> {
+) -> parser::Result<u32> {
     let mut was_last_ty_import_alias = false;
     let mut offset = 0;
+    let mut type_idx = 0;
     'field: for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -96,6 +97,15 @@ pub fn add_inc_import_section(
         match field {
             ComponentField::Type(_) | ComponentField::Import(_) | ComponentField::Alias(_) => {
                 was_last_ty_import_alias = true;
+                if let ComponentField::Type(_) = field {
+                    type_idx += 1;
+                } else if let ComponentField::Alias(alias) = field {
+                    if let AliasTarget::Export { kind, .. } = alias.target {
+                        if matches!(kind, ComponentExportAliasKind::Type) {
+                            type_idx += 1;
+                        }
+                    }
+                }
             }
             _ => {
                 if was_last_ty_import_alias && get_span(field).is_some() {
@@ -112,7 +122,7 @@ pub fn add_inc_import_section(
     );
     total_increment.add_to_string(output, offset, &msg);
 
-    Ok(())
+    Ok(type_idx)
 }
 
 /// Adds function imports to each inline module
@@ -693,6 +703,7 @@ pub fn bump_type_idxs(
     wat: &Wat,
     output: &mut String,
     total_increment: &mut OffsetTracker,
+    lower_bound: u32,
 ) -> parser::Result<()> {
     // Things to bump
     // canon resource.drop
@@ -701,7 +712,6 @@ pub fn bump_type_idxs(
     // i think thats it
 
     // TODO compute this instead of hardcoding
-    let LOWER_BOUND: u32 = 18;
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -743,20 +753,20 @@ pub fn bump_type_idxs(
         match field {
             ComponentField::CoreFunc(f) => {
                 if let CoreFuncKind::ResourceDrop(rd) = &f.kind {
-                    total_increment.increment_idx(output, rd.ty, Some(LOWER_BOUND));
+                    total_increment.increment_idx(output, rd.ty, Some(lower_bound));
                 }
             }
             // make this a function in this scope ig
             ComponentField::Type(t) => {
                 let idxs = idxs_in_type(&t);
                 for idx in idxs {
-                    total_increment.increment_idx(output, idx, Some(LOWER_BOUND));
+                    total_increment.increment_idx(output, idx, Some(lower_bound));
                 }
             }
             ComponentField::Func(f) => {
                 if let FuncKind::Lift { ty, .. } = &f.kind {
                     if let ComponentTypeUse::Ref(r) = ty {
-                        total_increment.increment_idx(output, r.idx, Some(LOWER_BOUND));
+                        total_increment.increment_idx(output, r.idx, Some(lower_bound));
                     }
                 }
             }

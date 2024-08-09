@@ -28,6 +28,7 @@ const INC_FUNC_DESC_CORE: &str = "(param i32) (param i32) (param i32) (param i32
 pub fn add_scaffolding(
     wat_text: String,
     binary: Option<Cow<[u8]>>,
+    verbose: bool,
 ) -> parser::Result<(String, DebugData)> {
     // Things to do: (in order)
     // Add import statement for the inc counter function (in type and import section)
@@ -54,14 +55,14 @@ pub fn add_scaffolding(
         find_code_offsets(&binary)
             .map_err(|_| Error::new(wat.span(), "Error reading binary file".to_string()))?,
     );
-    read_dbg_info(&wat, &wat_text, &mut wat_mapper)?;
+    read_dbg_info(&wat, &wat_text, &mut wat_mapper, verbose)?;
 
     let type_idx_bound = add_inc_import_section(&wat, &mut output, &mut total_increment)?;
     add_imports_in_module(&wat, &mut output, &mut total_increment)?;
     {
         let bl = bump_core_func_idxs(&wat, &mut output, &mut total_increment)?;
         // process blacklisted functions
-        let bl = process_blacklist(&wat, bl)?;
+        let bl = process_blacklist(&wat, bl, verbose)?;
         add_func_calls(
             &wat,
             &mut output,
@@ -69,13 +70,14 @@ pub fn add_scaffolding(
             bl,
             &wat_mapper,
             &wat_text,
+            verbose,
         )?;
     }
 
     bump_instance_idxs(&wat, &mut output, &mut total_increment)?;
-    bump_comp_func_idxs(&wat, &mut output, &mut total_increment)?;
+    bump_comp_func_idxs(&wat, &mut output, &mut total_increment, verbose)?;
     bump_type_idxs(&wat, &mut output, &mut total_increment, type_idx_bound)?;
-    add_instantiaion_arg(&wat, &mut output, &mut total_increment)?;
+    add_instantiaion_arg(&wat, &mut output, &mut total_increment, verbose)?;
     //panic!("erm.. what the bug");
     add_canon_lower_and_instance(&wat, &mut output, &mut total_increment)?;
     Ok((output, wat_mapper.into_debug_data()))
@@ -152,9 +154,7 @@ pub fn add_imports_in_module(
                     }
                 }
             }
-            // FIXME: Account for modules that end after imports (somehow)
             if offset == 0 {
-                eprintln!("Module had no fields after imports");
                 continue 'comp;
             }
             let msg = format!(
@@ -179,6 +179,7 @@ pub fn add_func_calls<'a>(
     blacklist: Vec<(Index<'a>, &'a Func<'a>)>,
     map: &WatLineMapper,
     text: &str,
+    verbose: bool,
 ) -> parser::Result<()> {
     let mut counter_idx = 0;
     let mut inline_mod_idx = 0;
@@ -200,7 +201,9 @@ pub fn add_func_calls<'a>(
                         {
                             continue;
                         }
-                        eprintln!("Func defined @{}", func.span.offset());
+                        if verbose {
+                            eprintln!("Func defined @{}", func.span.offset());
+                        }
 
                         if let wast::core::FuncKind::Inline {
                             locals: _,
@@ -339,6 +342,7 @@ pub fn bump_comp_func_idxs(
     wat: &Wat,
     output: &mut String,
     total_increment: &mut OffsetTracker,
+    verbose: bool,
 ) -> parser::Result<()> {
     // What to bump
     // canon lower <idx>
@@ -392,7 +396,9 @@ pub fn bump_comp_func_idxs(
             },
             ComponentField::Instance(i) => match &i.kind {
                 InstanceKind::Instantiate { component, args } => {
-                    eprintln!("comp: {:?}, args: {:?}", component, args);
+                    if verbose {
+                        eprintln!("comp: {:?}, args: {:?}", component, args);
+                    }
                     for arg in args {
                         match &arg.kind {
                             // I think this is the right match for an instance arg
@@ -476,6 +482,7 @@ pub fn bump_core_func_idxs<'a, 'b: 'a, 'c>(
 pub fn process_blacklist<'a, 'b: 'a>(
     wat: &'a Wat,
     blacklist: Vec<Index<'a>>,
+    verbose: bool,
 ) -> parser::Result<Vec<(Index<'a>, &'a Func<'a>)>> {
     // logic:
     // we have a vector of export references
@@ -485,7 +492,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
     // finding its moduledef and which function it corresponds to
     // by finding the export statement that exports the name we'ere looking for
 
-    let queue = map_idx_to_module(wat, blacklist)?;
+    let queue = map_idx_to_module(wat, blacklist, verbose)?;
     let mut blacklist: Vec<(Index, &Func)> = Vec::new();
     let fields = get_fields(&wat).ok_or(Error::new(
         wat.span(),
@@ -565,7 +572,9 @@ pub fn process_blacklist<'a, 'b: 'a>(
     // Now we have an iterator of module references and functions
     // Now we go through each func,
     while let Some((mod_idx, func)) = queue.pop() {
-        eprintln!("Blacklisting func id: {:?}, name: {:?}", func.id, func.name);
+        if verbose {
+            eprintln!("Blacklisting func id: {:?}, name: {:?}", func.id, func.name);
+        }
 
         if let wast::core::FuncKind::Inline {
             locals: _,
@@ -583,7 +592,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
                 continue;
             }
 
-            let debug = func.id.is_some_and(|id| id.name() == "allocate_stack");
+            let debug = func.id.is_some_and(|id| id.name() == "allocate_stack") && verbose;
             if debug {
                 eprintln!("IN CABI REALLOC");
             }
@@ -628,10 +637,12 @@ pub fn process_blacklist<'a, 'b: 'a>(
             }
 
             blacklist.push((mod_idx, func));
-            eprintln!(
-                "Finished blacklisting func id: {:?}, name: {:?}",
-                func.id, func.name
-            );
+            if verbose {
+                eprintln!(
+                    "Finished blacklisting func id: {:?}, name: {:?}",
+                    func.id, func.name
+                );
+            }
         }
     }
 
@@ -642,6 +653,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
 fn map_idx_to_module<'a, 'b: 'a>(
     wat: &'a Wat,
     blacklist: Vec<Index<'a>>,
+    verbose: bool,
 ) -> parser::Result<Vec<(Index<'a>, &'a str)>> {
     let mut out = Vec::new();
     let mut core_func_idx = 0;
@@ -681,7 +693,9 @@ fn map_idx_to_module<'a, 'b: 'a>(
                 _ => {}
             },
             ComponentField::CoreFunc(_) => {
-                eprintln!("TODO: parse core func");
+                if verbose {
+                    eprintln!("TODO: parse core func");
+                }
                 core_func_idx += 1;
             }
             ComponentField::CoreInstance(i) => match &i.kind {
@@ -782,6 +796,7 @@ pub fn add_instantiaion_arg(
     wat: &Wat,
     output: &mut String,
     total_increment: &mut OffsetTracker,
+    verbose: bool,
 ) -> parser::Result<()> {
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
@@ -790,7 +805,9 @@ pub fn add_instantiaion_arg(
         match field {
             ComponentField::CoreInstance(ci) => match &ci.kind {
                 CoreInstanceKind::Instantiate { .. } => {
-                    eprintln!("Core instance: {ci:?}, offset: {}", ci.span.offset());
+                    if verbose {
+                        eprintln!("Core instance: {ci:?}, offset: {}", ci.span.offset());
+                    }
                     // parse with regex
                     let msg = format!(
                         "(with \"{}\" (instance ${}))",

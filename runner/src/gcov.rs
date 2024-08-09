@@ -91,24 +91,33 @@ impl GCovFile {
 impl Display for GCovFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = fs::read_to_string(self.src_file.as_path()).map_err(|_| std::fmt::Error)?;
-        for (idx, str_line) in s.split('\n').enumerate() {
-            if let Some((line, num_blocks)) = self.counters.get(&(idx as u64)) {
-                let block_diff = *num_blocks - line.num_blocks();
-                let total_counters = line.total_counters();
-                let star = if block_diff > 0 {
-                    format!("*{}", block_diff)
+        let info_lines = s
+            .split('\n')
+            .enumerate()
+            .map(|(idx, str_line)| {
+                if let Some((line, num_blocks)) = self.counters.get(&(idx as u64)) {
+                    let block_diff = *num_blocks - line.num_blocks();
+                    let total_counters = line.total_counters();
+                    let star = if block_diff > 0 {
+                        format!("*{}", block_diff)
+                    } else {
+                        "".to_string()
+                    };
+                    let count = if total_counters > 0 {
+                        format!("{total_counters}")
+                    } else {
+                        "-".to_string()
+                    };
+                    (format!("{}{}:", count, star), (idx, str_line))
                 } else {
-                    "".to_string()
-                };
-                let count = if total_counters > 0 {
-                    format!("{total_counters}")
-                } else {
-                    "-".to_string()
-                };
-                writeln!(f, "{}{}: {}:{}", count, star, idx, str_line)?;
-            } else {
-                writeln!(f, "-: {}:{}", idx, str_line)?;
-            }
+                    ("-:".to_string(), (idx, str_line))
+                }
+            })
+            .collect::<Vec<_>>();
+        let max_len = info_lines.iter().map(|(s, _)| s.len()).max().unwrap();
+        for (info, (idx, str)) in info_lines {
+            let width = max_len - info.len();
+            writeln!(f, "{:width$} {}:{}", info, idx, str)?;
         }
         Ok(())
     }

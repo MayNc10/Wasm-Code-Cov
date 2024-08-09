@@ -93,7 +93,12 @@ impl WatLineMapper {
 
 /// Fill in a mapper struct with debug information contained in a Wat file
 /// The `text` argument should be the plaintext string that the `wat` argument was created from
-pub fn read_dbg_info(wat: &Wat, text: &str, map: &mut WatLineMapper) -> parser::Result<()> {
+pub fn read_dbg_info(
+    wat: &Wat,
+    text: &str,
+    map: &mut WatLineMapper,
+    verbose: bool,
+) -> parser::Result<()> {
     let mut code_module_idx = 0;
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
@@ -121,10 +126,12 @@ pub fn read_dbg_info(wat: &Wat, text: &str, map: &mut WatLineMapper) -> parser::
                     .borrow(|section| gimli::EndianSlice::new(section, gimli::LittleEndian));
                 let mut iter = dwarf.units();
                 while let Some(header) = iter.next().unwrap() {
-                    eprintln!(
-                        "Unit at <.debug_info+0x{:x}>",
-                        header.offset().as_debug_info_offset().unwrap().0
-                    );
+                    if verbose {
+                        eprintln!(
+                            "Unit at <.debug_info+0x{:x}>",
+                            header.offset().as_debug_info_offset().unwrap().0
+                        );
+                    }
                     let unit = dwarf.unit(header).unwrap();
                     let unit = unit.unit_ref(&dwarf);
 
@@ -140,7 +147,9 @@ pub fn read_dbg_info(wat: &Wat, text: &str, map: &mut WatLineMapper) -> parser::
                         while let Some((header, row)) = rows.next_row().unwrap() {
                             if row.end_sequence() {
                                 // End of sequence indicates a possible gap in addresses.
-                                eprintln!("{:x} end-sequence", row.address());
+                                if verbose {
+                                    eprintln!("{:x} end-sequence", row.address());
+                                }
                             } else {
                                 // Determine the path. Real applications should cache this for performance.
                                 let mut path = path::PathBuf::new();
@@ -181,14 +190,18 @@ pub fn read_dbg_info(wat: &Wat, text: &str, map: &mut WatLineMapper) -> parser::
                                 //eprintln!("{:x}", text_offset);
                                 //panic!();
 
-                                eprintln!(
-                                    "{:x} (%{:?}) {}:{}:{}",
-                                    row.address(),
-                                    str::from_utf8(&text.as_bytes()[text_offset..text_offset + 10]),
-                                    path.display(),
-                                    line,
-                                    column
-                                );
+                                if verbose {
+                                    eprintln!(
+                                        "{:x} (%{:?}) {}:{}:{}",
+                                        row.address(),
+                                        str::from_utf8(
+                                            &text.as_bytes()[text_offset..text_offset + 10]
+                                        ),
+                                        path.display(),
+                                        line,
+                                        column
+                                    );
+                                }
 
                                 let path_idx =
                                     map.file_map.iter().position(|p| *p == path).unwrap_or({

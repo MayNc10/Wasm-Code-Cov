@@ -24,6 +24,9 @@ struct Cli {
 
     #[arg(short, long, value_name = "DATA_OUTPUT_PATH")]
     data_output_path: Option<PathBuf>,
+
+    #[arg(short, long, value_name = "VERBOSE")]
+    verbose: bool,
 }
 
 fn main() -> io::Result<()> {
@@ -39,6 +42,7 @@ fn main() -> io::Result<()> {
     let (output, file_map) = add_scaffolding(
         cli.text.unwrap(),
         cli.binary_path.map(|p| Cow::Owned(fs::read(p).unwrap())),
+        cli.verbose,
     )
     .unwrap();
     if let Some(path) = cli.data_output_path {

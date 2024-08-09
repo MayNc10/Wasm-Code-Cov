@@ -116,7 +116,7 @@ impl Display for GCovFile {
             .collect::<Vec<_>>();
         let max_len = info_lines.iter().map(|(s, _)| s.len()).max().unwrap();
         for (info, (idx, str)) in info_lines {
-            let width = max_len - info.len();
+            let width = max_len;
             writeln!(f, "{:width$} {}:{}", info, idx, str)?;
         }
         Ok(())

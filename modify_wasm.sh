@@ -1,14 +1,9 @@
 #!/bin/bash
 set -e
 cd $HOME/warm-code-cov/
-cargo component build -p example-component
-#cargo b --release -p wat-annotator
-#NEW=$(wasm-tools print $HOME/warm-code-cov/target/wasm32-wasi*/debug/example-component.wasm | $HOME/warm-code-cov/target/release/wat-annotator)
+cargo b --release
+NEW=$(wasm-tools print -g -p $1 | $HOME/warm-code-cov/target/debug/wat-annotator --data-output-path data.json)
 
-cargo b -p wat-annotator
-NEW=$(wasm-tools print -g -p $HOME/warm-code-cov/target/wasm32-wasi*/debug/example-component.wasm | $HOME/warm-code-cov/target/debug/wat-annotator --data-output-path data.json)
-
-#echo "${NEW}"
 echo "${NEW}" > modified.wat
 echo "Embedding WAT"
 wasm-tools component wit modified.wat -o modified-world.wit

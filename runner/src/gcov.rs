@@ -101,9 +101,9 @@ impl Display for GCovFile {
                     let block_diff = *num_blocks - line.num_blocks();
                     let total_counters = line.total_counters();
                     let star = if block_diff > 0 && line.num_blocks() > 0 {
-                        format!("*{}", block_diff)
+                        "*"
                     } else {
-                        "".to_string()
+                        ""
                     };
                     let count = if total_counters > 0 {
                         format!("{total_counters}")
@@ -111,7 +111,7 @@ impl Display for GCovFile {
                         "-".to_string()
                     };
                     (
-                        format!("# {} {}{}:", num_blocks, count, star),
+                        format!("{}{}:", count, star),
                         (idx, str_line),
                     )
                 } else {

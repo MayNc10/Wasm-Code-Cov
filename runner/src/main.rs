@@ -90,7 +90,10 @@ struct Cli {
     data_path: Option<PathBuf>,
     // make this require data path
     #[arg(short, long, value_name = "OUTPUT_FILES")]
-    output_files: Option<Vec<PathBuf>>,
+    files_to_output: Option<Vec<PathBuf>>,
+
+    #[arg(short, long, value_name = "OUTPUT_FILES")]
+    output: Option<Vec<PathBuf>>,
 }
 
 fn main() -> wasmtime::Result<()> {
@@ -204,8 +207,10 @@ fn main() -> wasmtime::Result<()> {
         .call_run(&mut store)?
         .map_err(|_| wasmtime::Error::msg("running code returned error"))?;
 
-    if let Some(outputs) = cli.output_files {
-        for file in outputs {
+    if let Some(outputs) = cli.files_to_output {
+        let output_files = cli.output.unwrap();
+        assert_eq!(output_files.len(), outputs.len());
+        for (idx, file) in outputs.iter().enumerate() {
             if let Some(gcov) = store
                 .data()
                 .gcov_files
@@ -213,7 +218,7 @@ fn main() -> wasmtime::Result<()> {
                 .unwrap()
                 .get(&file.canonicalize().unwrap())
             {
-                println!("{}:\n{}", file.display(), gcov);
+                fs::write(output_files[idx].as_path(), format!("{}", gcov)).unwrap();
             } else {
                 eprintln!(
                     "Requested output file not found in source files! Requested file: {}, source files: {:?}",

@@ -1,14 +1,16 @@
 use core::str;
 use std::collections::HashMap;
-use std::path;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::{self, PathBuf};
 
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use wasmparser::{BinaryReaderError, Parser, Payload::*};
 use wast::core::{Custom, ModuleField};
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
-use crate::data::DebugData;
+use crate::data::DebugDataOwned;
 use crate::utils::*;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
@@ -50,6 +52,29 @@ impl WatLineMapper {
             panic!("duplicate lines???");
         }
     }
+
+    /// Add a file to the file map, and return its index
+    pub fn add_file(&mut self, file: PathBuf) -> usize {
+        let mut hasher = DefaultHasher::new();
+        self.file_map
+            .iter()
+            .position(|p| {
+                *p == file || {
+                    p.hash(&mut hasher);
+                    let s1 = hasher.finish();
+                    file.hash(&mut hasher);
+                    let s2 = hasher.finish();
+                    s1 == s2
+                }
+            })
+            .unwrap_or({
+                self.file_map.push(file);
+                if self.file_map.len() != self.file_map.iter().unique().count() {
+                    self.file_map = self.file_map.iter().unique().cloned().collect_vec();
+                }
+                self.file_map.len() - 1
+            })
+    }
     /// Gets the all the currently held debug lines
     pub fn lines(&self) -> &Vec<DebugLineInfo> {
         &self.lines
@@ -68,7 +93,9 @@ impl WatLineMapper {
             .max_by(|i1, i2| i1.address.cmp(&i2.address))
     }
     /// Consumes this struct and returns a `DebugData` struct representing information that should be passed to other programs
-    pub fn into_debug_data(self) -> DebugData {
+    pub fn into_debug_data(self) -> DebugDataOwned {
+        assert_eq!(self.file_map.len(), self.file_map.iter().unique().count());
+
         let mut blocks_per_line: HashMap<usize, Vec<_>> = HashMap::new();
         self.lines
             .into_iter()
@@ -89,10 +116,14 @@ impl WatLineMapper {
                     blocks_per_line.insert(path_idx, vec![(this_line, 1)]);
                 }
             });
-        DebugData {
+        DebugDataOwned {
             file_map: self.file_map,
             blocks_per_line,
         }
+    }
+
+    pub fn get_code_addr(&self, mod_idx: usize) -> Option<usize> {
+        self.code_offsets.get(mod_idx).map(|u| *u)
     }
 }
 
@@ -208,11 +239,7 @@ pub fn read_dbg_info(
                                     );
                                 }
 
-                                let path_idx =
-                                    map.file_map.iter().position(|p| *p == path).unwrap_or({
-                                        map.file_map.push(path);
-                                        map.file_map.len() - 1
-                                    });
+                                let path_idx = map.add_file(path);
 
                                 let info = DebugLineInfo {
                                     address: row.address(),

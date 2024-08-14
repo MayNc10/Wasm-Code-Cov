@@ -1,5 +1,4 @@
 #[allow(warnings)]
-mod bindings;
 
 fn fizzbuzz(num: u32) -> String {
     if num % 3 == 0 && num % 5 == 0 {
@@ -12,6 +11,8 @@ fn fizzbuzz(num: u32) -> String {
         num.to_string()
     }
 }
+
+mod bindings;
 
 fn main() {
     let end = 100;

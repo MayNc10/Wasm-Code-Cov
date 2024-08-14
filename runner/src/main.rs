@@ -10,7 +10,7 @@ use wasmtime::*;
 use wasmtime_wasi::{
     bindings::sync::exports::wasi::cli::run::Guest, WasiCtx, WasiCtxBuilder, WasiView,
 };
-use wat_annotator::data::DebugDataArc;
+use wat_annotator::data::*;
 use wat_annotator::CounterType;
 
 struct MyState {
@@ -116,7 +116,7 @@ fn main() -> wasmtime::Result<()> {
     let file_map = cli
         .data_path
         .map(|p| {
-            serde_json::from_slice::<wat_annotator::data::DebugData>(
+            serde_json::from_slice::<wat_annotator::data::DebugDataOwned>(
                 &fs::read(p).map_err(wasmtime::Error::new)?,
             )
             .map_err(wasmtime::Error::new)
@@ -130,6 +130,8 @@ fn main() -> wasmtime::Result<()> {
     wasmtime_wasi::add_to_linker_sync(&mut linker)?;
 
     let wasi = WasiCtxBuilder::new().inherit_stdio().build();
+
+    //let file_map = file_map.inspect(|d| (d as &dyn DebugData).print_idxs_for_file());
 
     let mut store = Store::new(
         &engine,
@@ -148,7 +150,7 @@ fn main() -> wasmtime::Result<()> {
             let (idx, ty, file_idx, line_num, col_num) = (
                 args.0 as usize,
                 CounterType::from_i32(args.1).unwrap(),
-                args.2,
+                args.2 as usize,
                 args.3,
                 args.4,
             );
@@ -164,17 +166,18 @@ fn main() -> wasmtime::Result<()> {
                 let debug_data = data.debug_data.as_ref().unwrap();
                 let path = &debug_data.file_map[file_idx as usize];
                 if !map.contains_key(path) {
-                    map.insert(path.clone(), GCovFile::new(path.clone(), &debug_data));
+                    map.insert(path.clone(), GCovFile::new(&debug_data, file_idx));
                 }
                 let gcov_file = map.get_mut(path).unwrap();
                 gcov_file.increment(line_num as u64, col_num as u64);
             }
 
             let file = if let Some(debug_data) = &store.data().debug_data {
-                Box::new(debug_data.file_map[file_idx as usize].display()) as Box<dyn Display>
+                Box::new(debug_data.file_map[file_idx].display()) as Box<dyn Display>
             } else {
                 Box::new(format!("IDX#{}", file_idx)) as Box<dyn Display>
             };
+
             println!(
                 "{} {} {} {} {}",
                 "RUNNER HOST:".red(),
@@ -183,6 +186,7 @@ fn main() -> wasmtime::Result<()> {
                 format!(", source line number:").dimmed(),
                 format!("@{}:{}:{}", file, line_num, col_num).yellow(),
             );
+
             Ok(())
         },
     )?;

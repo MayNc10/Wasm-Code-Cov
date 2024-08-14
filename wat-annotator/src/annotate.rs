@@ -1,5 +1,6 @@
 use core::str;
 use std::borrow::Cow;
+use std::thread::spawn;
 
 use regex::Regex;
 use wast::core::{ExportKind, Func, Instruction, ModuleField};
@@ -8,14 +9,14 @@ use wast::token::Index;
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
-use crate::data::DebugData;
+use crate::data::DebugDataOwned;
 use crate::debug::{find_code_offsets, read_dbg_info, WatLineMapper};
 use crate::offset_tracker::OffsetTracker;
 use crate::utils::*;
 use crate::CounterType;
 
 const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
-const BINARY_OFFSET_REGEX_STR: &str = r"\(;@(?P<hex>[0-9a-f]+)\s*;\)";
+const BINARY_OFFSET_REGEX_STR: &str = r"(?P<whole>\(;@(?P<hex>[0-9a-f]+)\s*;\))";
 const INC_FUNC_NAME: &str = "inc-counter";
 const INC_MODULE_NAME: &str = "inc-counter-module";
 // Is there a good way to ensure that these are always compatible? maybe a macro
@@ -29,7 +30,7 @@ pub fn add_scaffolding(
     wat_text: String,
     binary: Option<Cow<[u8]>>,
     verbose: bool,
-) -> parser::Result<(String, DebugData)> {
+) -> parser::Result<(String, DebugDataOwned)> {
     // Things to do: (in order)
     // Add import statement for the inc counter function (in type and import section)
     // Add import statements within each module
@@ -183,6 +184,7 @@ pub fn add_func_calls<'a>(
 ) -> parser::Result<()> {
     let mut counter_idx = 0;
     let mut inline_mod_idx = 0;
+    let mut line_addrs_inserted = Vec::new();
     let binary_offset_re = Regex::new(BINARY_OFFSET_REGEX_STR).unwrap();
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
@@ -191,7 +193,7 @@ pub fn add_func_calls<'a>(
         if let ComponentField::CoreModule(m) = field {
             // parse module fields
             if let CoreModuleKind::Inline { fields } = &m.kind {
-                for field in fields {
+                'fields: for field in fields {
                     if let ModuleField::Func(func) = field {
                         if blacklist
                             .iter()
@@ -210,66 +212,67 @@ pub fn add_func_calls<'a>(
                             expression,
                         } = &func.kind
                         {
-                            let instrs = &expression.instrs;
+                            let _instrs = &expression.instrs;
                             let spans = expression.instr_spans.as_ref().unwrap();
-                            for idx in 0..instrs.len() {
-                                match instrs[idx] {
-                                    // We can add more later
-                                    Instruction::Block(_)
-                                    | Instruction::If(_)
-                                    | Instruction::Else(_)
-                                    | Instruction::Loop(_) => {
-                                        // theres gotta be a better way to do this
-                                        let ty = match instrs[idx] {
-                                            Instruction::Block(_) => CounterType::Block,
-                                            Instruction::If(_) => CounterType::If,
-                                            Instruction::Else(_) => CounterType::Else,
-                                            Instruction::Loop(_) => CounterType::Loop,
-                                            _ => unreachable!(),
-                                        };
-                                        // find binary offset of this instruction
-                                        // this could be much more efficient
-                                        let line = str::from_utf8(
-                                            &text.as_bytes()[..=spans[idx].offset()],
-                                        )
-                                        .unwrap()
-                                        .split('\n')
-                                        .next_back()
-                                        .unwrap();
+                            if spans.len() == 0 { continue 'fields; }
 
-                                        let hex = binary_offset_re
-                                            .captures(line)
-                                            .unwrap()
-                                            .name("hex")
-                                            .unwrap()
-                                            .as_str();
-                                        let offset = u64::from_str_radix(hex, 16).unwrap();
-
-                                        let src_trip = map
-                                            .get_source_triplet(inline_mod_idx, offset)
-                                            .map_or((0, 0, 0), |info| {
-                                                (info.path_idx, info.line, info.column)
-                                            });
-
-                                        // insert line here
-                                        let msg = format!(
-                                            "i32.const {} i32.const {} i32.const {} i32.const {} i32.const {} call ${}\n",
-                                            counter_idx, ty as i32, src_trip.0, src_trip.1, src_trip.2, INC_FUNC_NAME
-                                        );
-                                        counter_idx += 1;
-
-                                        total_increment.add_to_string(
-                                            output,
-                                            spans[idx].offset() - 1,
-                                            &msg,
-                                        );
+                            let lines = map
+                                .lines()
+                                .iter()
+                                .filter(|dli| dli.code_module_idx == inline_mod_idx);
+                            // TODO ADD MORE LINES TO LINE ADDRS INSERTED
+                            if let Some(mod_offset) = map.get_code_addr(inline_mod_idx)  {
+                                for line in lines {
+                                    if line_addrs_inserted.contains(&(line.address)) {
+                                        continue;
                                     }
-                                    _ => {}
+
+                                    let true_bin_addr = mod_offset as u64 + line.address;
+                                    let txt_line = str::from_utf8(
+                                       if let Some(end) =
+                                            spans.last().map(|s| s.offset())
+                                        {
+                                            &text.as_bytes()[func.span.offset()..end + 1]
+                                        } else {
+                                            &text.as_bytes()[func.span.offset()..]
+                                        },
+                                    )
+                                    .unwrap();
+
+                                    let Some(text_offset) = binary_offset_re
+                                        .captures_iter(txt_line)
+                                        .map(|c| {
+                                            let m = c.name("hex").unwrap();
+                                            let bin_offset =
+                                                u64::from_str_radix(m.as_str(), 16).unwrap();
+                                            let m_whole = c.name("whole").unwrap();
+                                            let txt_offset = m_whole.end();
+                                            (bin_offset, txt_offset)
+                                        })
+                                        .filter(|(bin_off, _)| *bin_off == true_bin_addr)
+                                        .next()
+                                    else {
+                                        continue;
+                                    };
+
+                                    let text_offset = text_offset.1 + func.span.offset();
+
+                                    let msg = format!(
+                                        "i32.const {} i32.const {} i32.const {} i32.const {} i32.const {} call ${}\n",
+                                        counter_idx, 0, line.path_idx, line.line, line.column, INC_FUNC_NAME
+                                    );
+
+                                    counter_idx += 1;
+
+                                    total_increment.add_to_string(output, text_offset, &msg);
+
+                                    line_addrs_inserted.push(line.address);
                                 }
                             }
                         }
                     }
                 }
+
                 inline_mod_idx += 1;
             }
         }

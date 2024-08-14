@@ -69,12 +69,13 @@ pub struct GCovFile {
 
 impl GCovFile {
     /// Create a new GCov file representing the source code in `src_file`
-    pub fn new(src_file: Arc<PathBuf>, data: &DebugDataArc) -> GCovFile {
-        let counters = data.blocks_per_line
-            [&data.file_map.iter().position(|p| *p == src_file).unwrap()]
+    pub fn new(data: &DebugDataArc, file_idx: usize) -> GCovFile {
+        let counters: HashMap<_, _> = data.blocks_per_line[&file_idx]
             .iter()
             .map(|(idx, count)| (*idx, (Line::empty(), *count)))
             .collect();
+        let src_file = data.file_map[file_idx].clone();
+
         GCovFile { src_file, counters }
     }
     /// Increment a counter for the block at [`line_idx`]:[`column_idx`]
@@ -95,10 +96,11 @@ impl Display for GCovFile {
             .split('\n')
             .enumerate()
             .map(|(idx, str_line)| {
-                if let Some((line, num_blocks)) = self.counters.get(&(idx as u64)) {
+                let idx = idx as u64 + 1;
+                if let Some((line, num_blocks)) = self.counters.get(&idx) {
                     let block_diff = *num_blocks - line.num_blocks();
                     let total_counters = line.total_counters();
-                    let star = if block_diff > 0 {
+                    let star = if block_diff > 0 && line.num_blocks() > 0 {
                         format!("*{}", block_diff)
                     } else {
                         "".to_string()
@@ -108,7 +110,10 @@ impl Display for GCovFile {
                     } else {
                         "-".to_string()
                     };
-                    (format!("{}{}:", count, star), (idx, str_line))
+                    (
+                        format!("# {} {}{}:", num_blocks, count, star),
+                        (idx, str_line),
+                    )
                 } else {
                     ("-:".to_string(), (idx, str_line))
                 }

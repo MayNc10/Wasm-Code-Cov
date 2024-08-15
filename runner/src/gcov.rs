@@ -11,6 +11,7 @@ pub type ColumnIndex = u64;
 
 /// A line in a GCov program
 /// This is an enum of a bunch of diffetent states, but it could (and will!) be rewritten to be simpler
+#[derive(Debug)]
 pub enum Line {
     /// A Line with no counter blocks
     Empty,
@@ -48,7 +49,7 @@ impl Line {
         match self {
             Line::Empty => 0,
             Line::Singlet((_, count)) => *count,
-            Line::Plural(map) => map.keys().sum(),
+            Line::Plural(map) => map.values().sum(),
         }
     }
     /// Ge the number of unique blocks on this line
@@ -91,6 +92,9 @@ impl GCovFile {
 // Will allow us to write into an output file
 impl Display for GCovFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        //writeln!(f, "{:?}", self.counters);
+        //return Ok(());
+
         let s = fs::read_to_string(self.src_file.as_path()).map_err(|_| std::fmt::Error)?;
         let info_lines = s
             .split('\n')

@@ -208,24 +208,32 @@ fn main() -> wasmtime::Result<()> {
         .map_err(|_| wasmtime::Error::msg("running code returned error"))?;
 
     if let Some(outputs) = cli.files_to_output {
-        let output_files = cli.output.unwrap();
-        assert_eq!(output_files.len(), outputs.len());
-        for (idx, file) in outputs.iter().enumerate() {
-            if let Some(gcov) = store
-                .data()
-                .gcov_files
-                .as_ref()
-                .unwrap()
-                .get(&file.canonicalize().unwrap())
-            {
-                fs::write(output_files[idx].as_path(), format!("{}", gcov)).unwrap();
-            } else {
-                eprintln!(
-                    "Requested output file not found in source files! Requested file: {}, source files: {:?}",
-                    file.display(), store.data().gcov_files.as_ref().unwrap().keys()
-                );
+        if let Some(output_files) = cli.output {
+            assert_eq!(output_files.len(), outputs.len());
+            for (idx, file) in outputs.iter().enumerate() {
+                if let Some(gcov) = store
+                    .data()
+                    .gcov_files
+                    .as_ref()
+                    .unwrap()
+                    .get(&file.canonicalize().unwrap())
+                {
+                    fs::write(output_files[idx].as_path(), format!("{}", gcov)).unwrap();
+                } else {
+                    eprintln!(
+                        "Requested output file not found in source files! Requested file: {}, source files: {:?}",
+                        file.display(), store.data().gcov_files.as_ref().unwrap().keys()
+                    );
+                }
             }
         }
+else {
+    for path in outputs {
+        let gcov = &store.data().gcov_files.as_ref().unwrap()[&path.canonicalize().unwrap()];
+        println!("{}:\n{}", path.display(), gcov);
+    }
+}
+        
     }
     Ok(())
 }

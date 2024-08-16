@@ -6,3 +6,4 @@ Cargo.lock
 *.wit
 changes.md
 dbg-notes.md
+/build/

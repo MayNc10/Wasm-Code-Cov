@@ -1,10 +1,13 @@
 [workspace]
-members = ["wat-annotator", "example-component", "runner"]
+members = ["wat-annotator", "example-component", "runner", "wcov"]
 resolver = "1"
 
 [workspace.dependencies]
 clap = { version = "4.5.8", features = ["derive"] }
+colored = "2.0.0"
 wasmtime = { version = "22.0.0", features = ["runtime", "component-model"] }
+wasmparser = "0.212.0"
+wast = "212.0.0"
 serde = { version = "1.0.204", features = ["derive"] }
 # use json for now, we can change to a different serialization format at basically any time
 serde_json = "1.0"

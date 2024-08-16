@@ -7,6 +7,8 @@ fn fizzbuzz(num: u32) -> String {
         "fizz".into()
     } else if num % 5 == 0 {
         "buzz".into()
+    } else if num % 101 == 0 {
+        panic!();
     } else {
         num.to_string()
     }

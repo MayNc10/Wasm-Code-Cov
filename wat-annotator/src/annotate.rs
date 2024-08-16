@@ -214,14 +214,16 @@ pub fn add_func_calls<'a>(
                         {
                             let _instrs = &expression.instrs;
                             let spans = expression.instr_spans.as_ref().unwrap();
-                            if spans.len() == 0 { continue 'fields; }
+                            if spans.len() == 0 {
+                                continue 'fields;
+                            }
 
                             let lines = map
                                 .lines()
                                 .iter()
                                 .filter(|dli| dli.code_module_idx == inline_mod_idx);
                             // TODO ADD MORE LINES TO LINE ADDRS INSERTED
-                            if let Some(mod_offset) = map.get_code_addr(inline_mod_idx)  {
+                            if let Some(mod_offset) = map.get_code_addr(inline_mod_idx) {
                                 for line in lines {
                                     if line_addrs_inserted.contains(&(line.address)) {
                                         continue;
@@ -229,9 +231,7 @@ pub fn add_func_calls<'a>(
 
                                     let true_bin_addr = mod_offset as u64 + line.address;
                                     let txt_line = str::from_utf8(
-                                       if let Some(end) =
-                                            spans.last().map(|s| s.offset())
-                                        {
+                                        if let Some(end) = spans.last().map(|s| s.offset()) {
                                             &text.as_bytes()[func.span.offset()..end + 1]
                                         } else {
                                             &text.as_bytes()[func.span.offset()..]

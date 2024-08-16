@@ -114,10 +114,7 @@ impl Display for GCovFile {
                     } else {
                         "-".to_string()
                     };
-                    (
-                        format!("{}{}:", count, star),
-                        (idx, str_line),
-                    )
+                    (format!("{}{}:", count, star), (idx, str_line))
                 } else {
                     ("-:".to_string(), (idx, str_line))
                 }

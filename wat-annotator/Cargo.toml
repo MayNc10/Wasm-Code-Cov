@@ -10,6 +10,6 @@ itertools = "0.13.0"
 regex = "1.10.5"
 serde = { workspace = true }
 serde_json = { workspace = true }
-wasmparser = "0.212.0"
-wast = "212.0.0"
+wasmparser = { workspace = true}
+wast = { workspace = true }
 wasmtime = { workspace = true }

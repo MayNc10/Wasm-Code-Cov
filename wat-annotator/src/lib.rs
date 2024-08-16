@@ -1,7 +1,18 @@
 //! This library provides methods to modify and collect debug data about Wat components
 
 #![warn(missing_docs)]
-use std::fmt::Display;
+use std::{
+    borrow::Cow,
+    error::Error,
+    fmt::Display,
+    fs,
+    io::{self, Read},
+    path::PathBuf,
+};
+
+use annotate::add_scaffolding;
+use clap::{ArgGroup, Parser};
+use data::DebugDataOwned;
 
 /// A module for annotating Wat files with the runner harness
 pub mod annotate;
@@ -51,4 +62,25 @@ impl CounterType {
             None
         }
     }
+}
+
+pub fn parse_cli(
+    path: Option<PathBuf>,
+    mut text: Option<String>,
+    binary_path: Option<PathBuf>,
+    verbose: bool,
+) -> Result<(String, DebugDataOwned), Box<dyn Error>> {
+    if path.is_none() && text.is_none() {
+        // try read text from stdin
+        let mut buffer = String::new();
+        let mut stdin = io::stdin();
+        stdin.read_to_string(&mut buffer)?;
+        text = Some(buffer.to_string());
+    }
+
+    Ok(add_scaffolding(
+        text.unwrap(),
+        binary_path.map(|p| Cow::Owned(fs::read(p).unwrap())),
+        verbose,
+    )?)
 }

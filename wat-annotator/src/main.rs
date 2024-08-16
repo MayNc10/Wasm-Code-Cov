@@ -1,13 +1,11 @@
-use std::borrow::Cow;
 use std::error::Error;
-use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::fs::File;
+use std::io::Write;
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Parser};
 
-use wat_annotator::annotate::add_scaffolding;
-use wat_annotator::parse_cli;
+use wat_annotator::modify_wasm;
 
 #[derive(Parser)]
 #[clap(group(
@@ -33,7 +31,7 @@ pub struct Cli {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-    let (output, data) = parse_cli(cli.path, cli.text, cli.binary_path, cli.verbose)?;
+    let (output, data) = modify_wasm(cli.path, cli.text, cli.binary_path, cli.verbose)?;
 
     if let Some(path) = cli.data_output_path {
         let mut f = File::create(path).unwrap();

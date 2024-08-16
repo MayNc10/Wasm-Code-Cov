@@ -1,6 +1,5 @@
 use core::str;
 use std::borrow::Cow;
-use std::thread::spawn;
 
 use regex::Regex;
 use wast::core::{ExportKind, Func, Instruction, ModuleField};
@@ -13,7 +12,6 @@ use crate::data::DebugDataOwned;
 use crate::debug::{find_code_offsets, read_dbg_info, WatLineMapper};
 use crate::offset_tracker::OffsetTracker;
 use crate::utils::*;
-use crate::CounterType;
 
 const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
 const BINARY_OFFSET_REGEX_STR: &str = r"(?P<whole>\(;@(?P<hex>[0-9a-f]+)\s*;\))";

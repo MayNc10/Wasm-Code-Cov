@@ -122,6 +122,8 @@ impl WatLineMapper {
         }
     }
 
+    /// Get the code section offset for a particular module
+    /// If the module index is out of bounds, `None` is returned
     pub fn get_code_addr(&self, mod_idx: usize) -> Option<usize> {
         self.code_offsets.get(mod_idx).map(|u| *u)
     }

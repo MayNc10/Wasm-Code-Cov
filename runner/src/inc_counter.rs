@@ -1,3 +1,4 @@
+//! This module contains the code for the `inc-counter` function that modified Wasm component will call out to
 use std::fmt::Display;
 
 use colored::Colorize;
@@ -6,7 +7,12 @@ use wat_annotator::CounterType;
 
 use crate::{gcov::GCovFile, store, ConstantIterator};
 
-pub fn inc_counter(mut store: StoreContextMut<store::MyState>, args: (i32, i32, i32, i32, i32), verbose: bool) -> wasmtime::Result<()> {
+/// The `inc-counter` function that modified Wasm component will call out to
+pub fn inc_counter(
+    mut store: StoreContextMut<store::MyState>,
+    args: (i32, i32, i32, i32, i32),
+    verbose: bool,
+) -> wasmtime::Result<()> {
     let (idx, ty, file_idx, line_num, col_num) = (
         args.0 as usize,
         CounterType::from_i32(args.1).unwrap(),
@@ -17,8 +23,7 @@ pub fn inc_counter(mut store: StoreContextMut<store::MyState>, args: (i32, i32, 
     let counters = &mut store.data_mut().counters;
     if counters.len() <= idx {
         counters.extend(
-            ConstantIterator::<i32>::new_default_value(idx - counters.len() + 1)
-                .into_iter(),
+            ConstantIterator::<i32>::new_default_value(idx - counters.len() + 1).into_iter(),
         );
     }
     let data = store.data_mut();

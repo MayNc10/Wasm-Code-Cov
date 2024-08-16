@@ -11,5 +11,3 @@ wasmparser = { workspace = true }
 wasmprinter = "0.215.0"
 wast = { workspace = true }
 wat-annotator = {path = "../wat-annotator"}
-wit-component = "0.215.0"
-wit-parser = "0.215.0"

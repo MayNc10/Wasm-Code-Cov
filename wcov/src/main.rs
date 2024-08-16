@@ -1,9 +1,12 @@
+//! This binary provides command line tools to finish the whole process of modifying a wasm file and running it to test coverage
+//!
+
+#![warn(missing_docs)]
+
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::Display;
-use std::sync::Arc;
-use std::{fs, io};
-use std::{io::Read, path::PathBuf};
+use std::fs;
+use std::path::PathBuf;
 
 use clap::{ArgGroup, Parser};
 use colored::Colorize;
@@ -11,7 +14,6 @@ use wasmprinter::{Config, PrintFmtWrite};
 use wast::core::EncodeOptions;
 use wast::parser::{parse, ParseBuffer};
 use wast::Wat;
-use wit_component::{DecodedWasm, WitPrinter};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -47,24 +49,32 @@ fn main() -> Result<(), Box<dyn Error>> {
         assert!(cli.build_dir.is_dir())
     }
 
-    if cli.verbose { println!("{} Converting binary to WAT", "WCOV:".red()); }
+    if cli.verbose {
+        println!("{} Converting binary to WAT", "WCOV:".red());
+    }
     let binary = fs::read(cli.path.clone())?;
     let mut wat = PrintFmtWrite(String::new());
     let mut printer_cfg = Config::new();
     printer_cfg.print_offsets(true);
     printer_cfg.print(&binary, &mut wat)?;
     let wat = wat.0;
-    if cli.verbose { println!("{} Modifying WAT", "WCOV".red()); }
+    if cli.verbose {
+        println!("{} Modifying WAT", "WCOV".red());
+    }
     let (output_wat, data) =
-        wat_annotator::parse_cli(None, Some(wat), Some(cli.path), cli.verbose)?;
+        wat_annotator::modify_wasm(None, Some(wat), Some(cli.path), cli.verbose)?;
 
     let buf = ParseBuffer::new(&output_wat)?;
     let mut output_wat = parse::<Wat>(&buf)?;
-    if cli.verbose { println!("{} Encoding WAT to WASM", "WCOV:".red()); }
+    if cli.verbose {
+        println!("{} Encoding WAT to WASM", "WCOV:".red());
+    }
     let opts = EncodeOptions::default();
     let output_binary = opts.encode_wat(&mut output_wat)?;
 
-    if cli.verbose { println!("{} Creating output paths", "WCOV".red()); }
+    if cli.verbose {
+        println!("{} Creating output paths", "WCOV".red());
+    }
     // create paths
     let output_paths = cli
         .output_files
@@ -75,13 +85,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect::<Vec<_>>();
 
-        if cli.verbose { println!("{} Calling Runner", "WCOV".red()); }
+    if cli.verbose {
+        println!("{} Calling Runner", "WCOV".red());
+    }
     runner::run(
         output_binary,
         Some(data),
         Some(HashMap::new()),
         Some(cli.output_files),
         Some(output_paths),
-        cli.verbose
+        cli.verbose,
     )
 }

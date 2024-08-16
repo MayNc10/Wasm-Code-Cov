@@ -10,18 +10,12 @@ pub mod gcov;
 pub mod inc_counter;
 pub mod store;
 
-use colored::Colorize;
 use component::{Component, ResourceTable};
 use gcov::GCovFile;
 use store::MyState;
 use wasmtime::*;
-use wasmtime_wasi::{
-    bindings::sync::exports::wasi::cli::run::Guest, WasiCtx, WasiCtxBuilder, WasiView,
-};
+use wasmtime_wasi::{bindings::sync::exports::wasi::cli::run::Guest, WasiCtxBuilder};
 use wat_annotator::data::*;
-use wat_annotator::CounterType;
-
-
 
 // There's definitely a faster way to write this, but I like writing code :3
 
@@ -61,10 +55,10 @@ impl<T: Copy + Clone> Iterator for ConstantIterator<T> {
 }
 
 use std::collections::HashMap;
-use std::fmt::Display;
-use std::io::Read;
+
 use std::sync::Arc;
 
+/// Takes all the same arguments as the CLI tool, and runs a Wasm component under testing
 pub fn run(
     bytes: Vec<u8>,
     file_map: Option<DebugDataOwned>,
@@ -97,10 +91,7 @@ pub fn run(
         inc_counter::inc_counter(store, args, verbose)
     };
 
-    linker.root().func_wrap(
-        "inc-counter",
-        inc_counter,
-    )?;
+    linker.root().func_wrap("inc-counter", inc_counter)?;
 
     let component = Component::new(&engine, &bytes)?;
 

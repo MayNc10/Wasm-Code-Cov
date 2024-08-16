@@ -59,5 +59,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map_or(Ok(None), |v| v.map(Some))?;
     let gcov_files = file_map.as_ref().map(|_| HashMap::new());
 
-    runner::run(bytes, file_map, gcov_files, cli.files_to_output, cli.output, cli.verbose)
+    runner::run(
+        bytes,
+        file_map,
+        gcov_files,
+        cli.files_to_output,
+        cli.output,
+        cli.verbose,
+    )
 }

@@ -11,7 +11,6 @@ use std::{
 };
 
 use annotate::add_scaffolding;
-use clap::{ArgGroup, Parser};
 use data::DebugDataOwned;
 
 /// A module for annotating Wat files with the runner harness
@@ -64,7 +63,8 @@ impl CounterType {
     }
 }
 
-pub fn parse_cli(
+/// Takes the same input arguments as the CLI, and outputs either the modified WAT and data, or an error
+pub fn modify_wasm(
     path: Option<PathBuf>,
     mut text: Option<String>,
     binary_path: Option<PathBuf>,

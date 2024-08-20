@@ -12,6 +12,7 @@ pub mod lcov;
 pub mod store;
 
 use crate::annotator::data::*;
+use crate::noise::NoiseLevel;
 use crate::printer::{println_runner_dbg, println_runner_error};
 use component::{Component, ResourceTable};
 use gcov::GCovFile;
@@ -69,7 +70,7 @@ pub fn run(
     files_to_output: Option<Vec<PathBuf>>,
     output: Option<Vec<PathBuf>>,
     tracefile_path: Option<PathBuf>,
-    verbose: bool,
+    noise_level: NoiseLevel,
 ) -> Result<(), Box<dyn Error>> {
     let engine = Engine::default();
 
@@ -86,13 +87,13 @@ pub fn run(
             counters: Vec::new(),
             debug_data: file_map.map(Into::into),
             gcov_files,
-            verbose,
+            noise_level,
         },
     );
 
     let inc_counter = |store: StoreContextMut<MyState>, args| {
-        let verbose = store.data().verbose;
-        inc_counter::inc_counter(store, args, verbose)
+        let noise_level = store.data().noise_level;
+        inc_counter::inc_counter(store, args, noise_level)
     };
 
     linker.root().func_wrap("inc-counter", inc_counter)?;
@@ -103,7 +104,7 @@ pub fn run(
     let guest = GuestPre::new(&component)?.load(&mut store, &instance)?;
 
     let exit_code = guest.call_run(&mut store)?;
-    if exit_code.is_err() {
+    if exit_code.is_err() && noise_level.err() {
         println_runner_error("Wasm exit code was error");
     }
 
@@ -119,7 +120,7 @@ pub fn run(
                     .get(&file.canonicalize().unwrap())
                 {
                     fs::write(output_files[idx].as_path(), format!("{}", gcov)).unwrap();
-                } else {
+                } else if noise_level.err() {
                     println_runner_error(format!("Requested output file not found in source files! Requested file: {}, source files: {:?}",
                         file.display(), store.data().gcov_files.as_ref().unwrap().keys()));
                 }
@@ -144,17 +145,17 @@ pub fn run(
             for file_path in &outputs {
                 let file_path = file_path.canonicalize().unwrap();
                 let gcov = files.get(&file_path).unwrap();
-                if verbose {
+                if noise_level.debug() {
                     println_runner_dbg(format!(
                         "Adding file to tracefile: {}",
                         file_path.display()
                     ));
                 }
                 if let Some(sdi) = debug_data.get_sdi_from_file(&file_path) {
-                    if verbose {
+                    if noise_level.debug() {
                         println_runner_dbg("Creating SDI");
                     }
-                    let source_file = lcov::SourceFile::new(gcov, sdi);
+                    let source_file = lcov::SourceFile::new(gcov, sdi, noise_level);
                     source_files.push(source_file);
                 }
             }

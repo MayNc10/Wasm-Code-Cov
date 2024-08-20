@@ -1,7 +1,7 @@
 //! This module provides the `MyState` struct for storing state while running a Wasm component
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use crate::annotator::data::DebugDataArc;
+use crate::{annotator::data::DebugDataArc, noise::NoiseLevel};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
 
 use crate::runner::gcov::GCovFile;
@@ -19,7 +19,7 @@ pub struct MyState {
     /// A map of paths to gcov annotated versions
     pub gcov_files: Option<HashMap<Arc<PathBuf>, GCovFile>>,
     /// Whether the runner should print debug output
-    pub verbose: bool,
+    pub noise_level: NoiseLevel,
 }
 
 impl WasiView for MyState {

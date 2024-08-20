@@ -4,6 +4,7 @@ use std::{fmt::Display, path::PathBuf, sync::Arc};
 
 use crate::annotator::debug::SourceDebugInfo;
 
+use crate::noise::NoiseLevel;
 use crate::printer::println_wcov_error;
 use crate::runner::gcov::GCovFile;
 
@@ -27,7 +28,11 @@ pub struct SourceFile {
 
 impl SourceFile {
     /// Create a new `SourceFile` from a Gcovfile containing counter information and a SourceDebugInfo struct
-    pub fn new(counter_log: &GCovFile, sdi: &SourceDebugInfo) -> SourceFile {
+    pub fn new(
+        counter_log: &GCovFile,
+        sdi: &SourceDebugInfo,
+        noise_level: NoiseLevel,
+    ) -> SourceFile {
         let path = counter_log.clone_src_file();
         let version = None;
         let functions = sdi
@@ -40,13 +45,15 @@ impl SourceFile {
             .enumerate()
             .map(|(idx, (start, _, _))| {
                 let counters = counter_log.get_counters_for_line(*start);
-                if counters.is_none() {
+                if counters.is_none() && noise_level.err() {
                     println_wcov_error("lcov error: function line has no counters");
                 }
                 (counters.unwrap(), idx)
             })
             .collect::<Vec<_>>();
-        println_wcov_error("TODO: output branch info");
+        if noise_level.err() {
+            println_wcov_error("TODO: output branch info");
+        }
         let branch_coverage = Vec::new();
         let last_line = functions
             .iter()

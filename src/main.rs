@@ -13,6 +13,7 @@ use wasmprinter::{Config, PrintFmtWrite};
 use wast::core::EncodeOptions;
 use wast::parser::{parse, ParseBuffer};
 use wast::Wat;
+use wcov::noise::NoiseLevel;
 use wcov::printer::println_wcov_dbg;
 
 #[derive(Parser)]
@@ -21,9 +22,16 @@ use wcov::printer::println_wcov_dbg;
     ArgGroup::new("input")
         .args(&["path", "bytes"])
 ))]
+#[clap(group(
+    ArgGroup::new("output_noise_level")
+        .args(&["verbose", "quiet"])
+))]
 struct Cli {
     #[arg(short, long, value_name = "VERBOSE")]
     verbose: bool,
+
+    #[arg(short, long, value_name = "QUIET")]
+    quiet: bool,
 
     #[arg(short, long, value_name = "FILE")]
     path: PathBuf,
@@ -51,8 +59,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         assert!(cli.build_dir.is_dir())
     }
+    let noise_level = NoiseLevel::from_settings(cli.verbose, cli.quiet);
 
-    if cli.verbose {
+    if noise_level.debug() {
         println_wcov_dbg("Converting binary to WAT");
     }
     let binary = fs::read(cli.path.clone())?;
@@ -61,11 +70,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     printer_cfg.print_offsets(true);
     printer_cfg.print(&binary, &mut wat)?;
     let wat = wat.0;
-    if cli.verbose {
+    if noise_level.debug() {
         println_wcov_dbg("Modifying WAT")
     }
     let (output_wat, data) =
-        wcov::annotator::modify_wasm(None, Some(wat), Some(cli.path), cli.verbose)?;
+        wcov::annotator::modify_wasm(None, Some(wat), Some(cli.path), noise_level)?;
 
     if cli.dump_data {
         // output data to build folder
@@ -76,13 +85,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let buf = ParseBuffer::new(&output_wat)?;
     let mut output_wat = parse::<Wat>(&buf)?;
-    if cli.verbose {
+    if noise_level.debug() {
         println_wcov_dbg("Encoding WAT to WASM")
     }
     let opts = EncodeOptions::default();
     let output_binary = opts.encode_wat(&mut output_wat)?;
 
-    if cli.verbose {
+    if noise_level.debug() {
         println_wcov_dbg("Creating output paths");
     }
     // create paths
@@ -97,7 +106,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let tracefile_path = cli.build_dir.join("wcov.info");
 
-    if cli.verbose {
+    if noise_level.debug() {
         println_wcov_dbg("Calling runner");
     }
     wcov::runner::run(
@@ -107,6 +116,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(cli.output_files),
         Some(output_paths),
         Some(tracefile_path),
-        cli.verbose,
+        noise_level,
     )
 }

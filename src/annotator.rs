@@ -13,6 +13,8 @@ use std::{
 use annotate::add_scaffolding;
 use data::DebugDataOwned;
 
+use crate::noise::NoiseLevel;
+
 /// A module for annotating Wat files with the runner harness
 pub mod annotate;
 /// A module containing the representation of debug data structs
@@ -68,7 +70,7 @@ pub fn modify_wasm(
     path: Option<PathBuf>,
     mut text: Option<String>,
     binary_path: Option<PathBuf>,
-    verbose: bool,
+    noise_level: NoiseLevel,
 ) -> Result<(String, DebugDataOwned), Box<dyn Error>> {
     if path.is_none() && text.is_none() {
         // try read text from stdin
@@ -81,6 +83,6 @@ pub fn modify_wasm(
     Ok(add_scaffolding(
         text.unwrap(),
         binary_path.map(|p| Cow::Owned(fs::read(p).unwrap())),
-        verbose,
+        noise_level,
     )?)
 }

@@ -12,6 +12,7 @@ use wast::{parser, Error};
 
 use crate::annotator::data::DebugDataOwned;
 use crate::annotator::utils::*;
+use crate::noise::NoiseLevel;
 use crate::printer::{println_annotate_dbg, println_annotate_error};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -154,7 +155,7 @@ pub fn read_dbg_info(
     wat: &Wat,
     _text: &str,
     map: &mut WatLineMapper,
-    verbose: bool,
+    noise_level: NoiseLevel,
 ) -> parser::Result<()> {
     let mut code_module_idx = 0;
     // todo: refactor!
@@ -184,7 +185,7 @@ pub fn read_dbg_info(
                     .borrow(|section| gimli::EndianSlice::new(section, gimli::LittleEndian));
                 let mut iter = dwarf.units();
                 while let Some(header) = iter.next().unwrap() {
-                    if verbose {
+                    if noise_level.debug() {
                         println_annotate_dbg(format!(
                             "Unit at <.debug_info+0x{:x}>",
                             header.offset().as_debug_info_offset().unwrap().0
@@ -197,7 +198,7 @@ pub fn read_dbg_info(
                     let mut funcs = Vec::new();
                     while let Some((_, entry)) = entries.next_dfs().unwrap() {
                         if entry.tag() == gimli::DW_TAG_subprogram {
-                            if verbose {
+                            if noise_level.debug() {
                                 println_annotate_dbg(format!("Found a function: {:?}", entry));
                             }
                             let low_pc =
@@ -226,7 +227,7 @@ pub fn read_dbg_info(
                                     })
                                     .map(|s| str::from_utf8(s.slice()).unwrap())
                             });
-                            if low_pc.is_some() && verbose {
+                            if low_pc.is_some() && noise_level.debug() {
                                 println_annotate_dbg(format!(
                                     "low pc: {:x}, high pc: {:x}, name: {:?}, file: {:?}",
                                     low_pc.unwrap(),
@@ -250,7 +251,7 @@ pub fn read_dbg_info(
                                 );
                                 funcs.push(func_pair);
                             }
-                            if verbose {
+                            if noise_level.debug() {
                                 println_annotate_dbg(format!("SDI DWARF IDX: {:?}", file));
                             }
                         }
@@ -269,7 +270,7 @@ pub fn read_dbg_info(
                         while let Some((header, row)) = rows.next_row().unwrap() {
                             if row.end_sequence() {
                                 // End of sequence indicates a possible gap in addresses.
-                                if verbose {
+                                if noise_level.debug() {
                                     println_annotate_dbg(format!(
                                         "{:x} end-sequence",
                                         row.address()
@@ -315,9 +316,12 @@ pub fn read_dbg_info(
                                     }
                                 }
                                 if path_idx.is_none() {
-                                    println_annotate_error(
-                                        "Error: Unable to resolved source file path",
-                                    );
+                                    if noise_level.err() {
+                                        println_annotate_error(
+                                            "Error: Unable to resolved source file path",
+                                        );
+                                    }
+
                                     continue;
                                 }
                                 let path_idx = path_idx.unwrap();
@@ -333,7 +337,7 @@ pub fn read_dbg_info(
                                     gimli::ColumnType::Column(column) => column.get(),
                                 };
 
-                                if verbose {
+                                if noise_level.debug() {
                                     println_annotate_dbg(format!(
                                         "{:x} {}:{}:{}",
                                         row.address(),
@@ -382,9 +386,12 @@ pub fn read_dbg_info(
                                     .min_by(|dli1, dli2| dli1.address.cmp(&dli2.address));
 
                                 if start_line.is_none() {
-                                    println_annotate_error(
-                                        "Error: no valid dli found for function definition",
-                                    );
+                                    if noise_level.err() {
+                                        println_annotate_error(
+                                            "Error: no valid dli found for function definition",
+                                        );
+                                    }
+
                                     continue 'func;
                                 }
 
@@ -396,7 +403,7 @@ pub fn read_dbg_info(
                                         .unwrap()
                                         .line
                                 });
-                                if verbose {
+                                if noise_level.debug() {
                                     println_annotate_dbg(format!(
                                         "Mapped to {}, {:?}",
                                         start_line.line, end_line
@@ -418,7 +425,7 @@ pub fn read_dbg_info(
                                     branches: Vec::new(),
                                 };
                                 map.sdi_vec.push(sdi);
-                            } else {
+                            } else if noise_level.err() {
                                 println_annotate_error("Error: SDI file had no entry in file map")
                             }
                         }

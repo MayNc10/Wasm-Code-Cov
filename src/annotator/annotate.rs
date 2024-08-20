@@ -12,6 +12,7 @@ use crate::annotator::data::DebugDataOwned;
 use crate::annotator::debug::{find_code_offsets, read_dbg_info, SourceDebugInfo, WatLineMapper};
 use crate::annotator::offset_tracker::OffsetTracker;
 use crate::annotator::utils::*;
+use crate::noise::NoiseLevel;
 use crate::printer::{println_annotate_dbg, println_annotate_error};
 
 const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
@@ -28,7 +29,7 @@ const INC_FUNC_DESC_CORE: &str = "(param i32) (param i32) (param i32) (param i32
 pub fn add_scaffolding(
     wat_text: String,
     binary: Option<Cow<[u8]>>,
-    verbose: bool,
+    noise_level: NoiseLevel,
 ) -> parser::Result<(String, DebugDataOwned)> {
     // Things to do: (in order)
     // Add import statement for the inc counter function (in type and import section)
@@ -55,14 +56,14 @@ pub fn add_scaffolding(
         find_code_offsets(&binary)
             .map_err(|_| Error::new(wat.span(), "Error reading binary file".to_string()))?,
     );
-    read_dbg_info(&wat, &wat_text, &mut wat_mapper, verbose)?;
+    read_dbg_info(&wat, &wat_text, &mut wat_mapper, noise_level)?;
 
     let type_idx_bound = add_inc_import_section(&wat, &mut output, &mut total_increment)?;
     add_imports_in_module(&wat, &mut output, &mut total_increment)?;
     {
         let bl = bump_core_func_idxs(&wat, &mut output, &mut total_increment)?;
         // process blacklisted functions
-        let bl = process_blacklist(&wat, bl, verbose)?;
+        let bl = process_blacklist(&wat, bl, noise_level)?;
         add_func_calls(
             &wat,
             &mut output,
@@ -70,14 +71,14 @@ pub fn add_scaffolding(
             bl,
             &wat_mapper,
             &wat_text,
-            verbose,
+            noise_level,
         )?;
     }
 
     bump_instance_idxs(&wat, &mut output, &mut total_increment)?;
-    bump_comp_func_idxs(&wat, &mut output, &mut total_increment, verbose)?;
+    bump_comp_func_idxs(&wat, &mut output, &mut total_increment, noise_level)?;
     bump_type_idxs(&wat, &mut output, &mut total_increment, type_idx_bound)?;
-    add_instantiaion_arg(&wat, &mut output, &mut total_increment, verbose)?;
+    add_instantiaion_arg(&wat, &mut output, &mut total_increment, noise_level)?;
     //panic!("erm.. what the bug");
     add_canon_lower_and_instance(&wat, &mut output, &mut total_increment)?;
     Ok((output, wat_mapper.into_debug_data()))
@@ -179,7 +180,7 @@ pub fn add_func_calls<'a>(
     blacklist: Vec<(Index<'a>, &'a Func<'a>)>,
     map: &WatLineMapper,
     text: &str,
-    verbose: bool,
+    noise_level: NoiseLevel,
 ) -> parser::Result<()> {
     let mut counter_idx = 0;
     let mut inline_mod_idx = 0;
@@ -198,7 +199,7 @@ pub fn add_func_calls<'a>(
                         if blacklist.iter().any(|(_, f)| f.span == func.span) {
                             continue;
                         }
-                        if verbose {
+                        if noise_level.debug() {
                             println_annotate_dbg(format!("Func defined @{}", func.span.offset()));
                         }
 
@@ -279,7 +280,7 @@ pub fn add_func_calls<'a>(
                                             .count()
                                             > 0
                                         {
-                                            if verbose {
+                                            if noise_level.debug() {
                                                 println_annotate_dbg(format!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", 
                                                 spans.first().unwrap().offset() , func.span.offset(), func_at.unwrap().2, line));
                                             }
@@ -390,7 +391,7 @@ pub fn bump_comp_func_idxs(
     wat: &Wat,
     output: &mut String,
     total_increment: &mut OffsetTracker,
-    verbose: bool,
+    noise_level: NoiseLevel,
 ) -> parser::Result<()> {
     // What to bump
     // canon lower <idx>
@@ -439,7 +440,7 @@ pub fn bump_comp_func_idxs(
             },
             ComponentField::Instance(i) => {
                 if let InstanceKind::Instantiate { component, args } = &i.kind {
-                    if verbose {
+                    if noise_level.debug() {
                         println_annotate_dbg(format!("comp: {:?}, args: {:?}", component, args));
                     }
                     for arg in args {
@@ -515,7 +516,7 @@ pub fn bump_core_func_idxs<'a, 'b: 'a, 'c>(
 pub fn process_blacklist<'a, 'b: 'a>(
     wat: &'a Wat,
     blacklist: Vec<Index<'a>>,
-    verbose: bool,
+    noise_level: NoiseLevel,
 ) -> parser::Result<Vec<(Index<'a>, &'a Func<'a>)>> {
     // logic:
     // we have a vector of export references
@@ -525,7 +526,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
     // finding its moduledef and which function it corresponds to
     // by finding the export statement that exports the name we'ere looking for
 
-    let queue = map_idx_to_module(wat, blacklist, verbose)?;
+    let queue = map_idx_to_module(wat, blacklist, noise_level)?;
     let mut blacklist: Vec<(Index, &Func)> = Vec::new();
     let fields = get_fields(wat).ok_or(Error::new(
         wat.span(),
@@ -605,7 +606,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
     // Now we have an iterator of module references and functions
     // Now we go through each func,
     while let Some((mod_idx, func)) = queue.pop() {
-        if verbose {
+        if noise_level.debug() {
             println_annotate_dbg(format!(
                 "Blacklisting func id: {:?}, name: {:?}",
                 func.id, func.name
@@ -646,12 +647,18 @@ pub fn process_blacklist<'a, 'b: 'a>(
                     todo!()
                 }
             } else {
-                println_annotate_dbg(format!("Module index: ${:?}", mod_idx));
+                if noise_level.err() {
+                    println_annotate_error(format!(
+                        "error: module index was an id. module index: ${:?}",
+                        mod_idx
+                    ));
+                }
+
                 todo!()
             }
 
             blacklist.push((mod_idx, func));
-            if verbose {
+            if noise_level.debug() {
                 println_annotate_dbg(format!(
                     "Finished blacklisting func id: {:?}, name: {:?}",
                     func.id, func.name
@@ -667,7 +674,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
 fn map_idx_to_module<'a, 'b: 'a>(
     wat: &'a Wat,
     blacklist: Vec<Index<'a>>,
-    _verbose: bool,
+    noise_level: NoiseLevel,
 ) -> parser::Result<Vec<(Index<'a>, &'a str)>> {
     let mut out = Vec::new();
     let mut core_func_idx = 0;
@@ -702,7 +709,10 @@ fn map_idx_to_module<'a, 'b: 'a>(
                 }
             }
             ComponentField::CoreFunc(_) => {
-                println_annotate_error("TODO: parse core func");
+                if noise_level.err() {
+                    println_annotate_error("TODO: parse core func");
+                }
+
                 core_func_idx += 1;
             }
             ComponentField::CoreInstance(i) => match &i.kind {
@@ -805,7 +815,7 @@ pub fn add_instantiaion_arg(
     wat: &Wat,
     output: &mut String,
     total_increment: &mut OffsetTracker,
-    verbose: bool,
+    noise_level: NoiseLevel,
 ) -> parser::Result<()> {
     for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
@@ -813,7 +823,7 @@ pub fn add_instantiaion_arg(
     ))? {
         if let ComponentField::CoreInstance(ci) = field {
             if let CoreInstanceKind::Instantiate { .. } = &ci.kind {
-                if verbose {
+                if noise_level.debug() {
                     println_annotate_dbg(format!(
                         "Core instance: {ci:?}, offset: {}",
                         ci.span.offset()

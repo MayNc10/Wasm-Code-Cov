@@ -1,7 +1,7 @@
 //! This module contains the code for the `inc-counter` function that modified Wasm component will call out to
 use std::fmt::Display;
 
-use crate::printer::println_runner_dbg;
+use crate::{noise::NoiseLevel, printer::println_runner_dbg};
 use colored::Colorize;
 use wasmtime::StoreContextMut;
 
@@ -11,7 +11,7 @@ use crate::runner::{gcov::GCovFile, store, ConstantIterator};
 pub fn inc_counter(
     mut store: StoreContextMut<store::MyState>,
     args: (i32, i32, i32, i32, i32),
-    verbose: bool,
+    noise_level: NoiseLevel,
 ) -> wasmtime::Result<()> {
     let (idx, file_idx, line_num, col_num) = (args.0 as usize, args.2 as usize, args.3, args.4);
     let counters = &mut store.data_mut().counters;
@@ -37,7 +37,7 @@ pub fn inc_counter(
         Box::new(format!("IDX#{}", file_idx)) as Box<dyn Display>
     };
 
-    if verbose {
+    if noise_level.debug() {
         println_runner_dbg(format!(
             "{}{} {}",
             format!("Accessed idx #{}", idx).dimmed(),

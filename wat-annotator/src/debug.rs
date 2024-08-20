@@ -123,7 +123,7 @@ impl WatLineMapper {
                 }
             });
 
-        let sdi_vec = self.sdi_vec;//.into_iter().map(|(start, end, str, _addr)| (start, end, str)).collect::<Vec<_>>();
+        let sdi_vec = self.sdi_vec; //.into_iter().map(|(start, end, str, _addr)| (start, end, str)).collect::<Vec<_>>();
         DebugDataOwned {
             file_map: self.file_map,
             blocks_per_line,
@@ -356,7 +356,6 @@ pub fn read_dbg_info(
                             let (dwarf_file, func) = func;
                             // map func addrs to actual lines
                             // maybe we should make the functions before this processing a different struct?
-                            
 
                             // map dwarf file index
                             let file = program.header().file(dwarf_file).unwrap();
@@ -369,33 +368,31 @@ pub fn read_dbg_info(
                             if let Some(path_idx) =
                                 file_entry_map.get(&(file.directory_index(), file_name))
                             {
-                                let dlis_in_mod = map
-                                .lines
-                                .iter()
-                                .filter(|dli| dli.code_module_idx == code_module_idx && dli.path_idx == *path_idx);
+                                let dlis_in_mod = map.lines.iter().filter(|dli| {
+                                    dli.code_module_idx == code_module_idx
+                                        && dli.path_idx == *path_idx
+                                });
 
+                                let start_line = dlis_in_mod
+                                    .clone()
+                                    .filter(|dli| dli.address >= func.0)
+                                    .min_by(|dli1, dli2| dli1.address.cmp(&dli2.address));
 
-                            let start_line = dlis_in_mod
-                                .clone()
-                                .filter(|dli| dli.address >= func.0)
-                                .min_by(|dli1, dli2| dli1.address.cmp(&dli2.address));
+                                if start_line.is_none() {
+                                    eprintln!("ERROR: no valid dli found for function definition");
+                                    continue 'func;
+                                }
 
-                            if start_line.is_none() {
-                                eprintln!("ERROR: no valid dli found for function definition");
-                                continue 'func;
-                            }
-                                
-                            let start_line = start_line.unwrap();
-                            let end_line = func.1.map(|addr| {
-                                dlis_in_mod
-                                    .filter(|dli| dli.address <= addr)
-                                    .max_by(|dli1, dli2| dli1.line.cmp(&dli2.line)) // figure out why this gives errors
-                                    .unwrap()
-                                    .line
-                            });
-                            println!("Mapped to {}, {:?}", start_line.line, end_line);
-                            let func = (start_line.line, end_line, func.2, start_line.address);
-
+                                let start_line = start_line.unwrap();
+                                let end_line = func.1.map(|addr| {
+                                    dlis_in_mod
+                                        .filter(|dli| dli.address <= addr)
+                                        .max_by(|dli1, dli2| dli1.line.cmp(&dli2.line)) // figure out why this gives errors
+                                        .unwrap()
+                                        .line
+                                });
+                                println!("Mapped to {}, {:?}", start_line.line, end_line);
+                                let func = (start_line.line, end_line, func.2, start_line.address);
 
                                 // search the SDIs
                                 for sdi in &mut map.sdi_vec {

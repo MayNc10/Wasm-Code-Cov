@@ -137,31 +137,31 @@ pub fn run(
 
         // create tracefile
         if tracefile_path.is_some()
-        && store.data().gcov_files.is_some()
-        && store.data().debug_data.is_some()
-    {
-        let mut source_files = Vec::new();
+            && store.data().gcov_files.is_some()
+            && store.data().debug_data.is_some()
+        {
+            let mut source_files = Vec::new();
 
-        let files = store.data().gcov_files.as_ref().unwrap();
-        let debug_data = store.data().debug_data.as_ref().unwrap();
-        for file_path in &outputs {
-            let file_path = file_path.canonicalize().unwrap();
-            let gcov = files.get(&file_path).unwrap();
-            if verbose {
-                println!("Adding file to tracefile: {}", file_path.display());
-            }
-            if let Some(sdi) = debug_data.get_sdi_from_file(&file_path) {
+            let files = store.data().gcov_files.as_ref().unwrap();
+            let debug_data = store.data().debug_data.as_ref().unwrap();
+            for file_path in &outputs {
+                let file_path = file_path.canonicalize().unwrap();
+                let gcov = files.get(&file_path).unwrap();
                 if verbose {
-                    println!("Creating SDI");
+                    println!("Adding file to tracefile: {}", file_path.display());
                 }
-                let source_file = lcov::SourceFile::new(&gcov, &sdi);
-                source_files.push(source_file);
+                if let Some(sdi) = debug_data.get_sdi_from_file(&file_path) {
+                    if verbose {
+                        println!("Creating SDI");
+                    }
+                    let source_file = lcov::SourceFile::new(&gcov, &sdi);
+                    source_files.push(source_file);
+                }
             }
+            let tracefile = lcov::TraceFile::new(Some("tracefile"), source_files);
+            let path = tracefile_path.unwrap();
+            fs::write(path.as_path(), format!("{}", tracefile)).unwrap();
         }
-        let tracefile = lcov::TraceFile::new(Some("tracefile"), source_files);
-        let path = tracefile_path.unwrap();
-        fs::write(path.as_path(), format!("{}", tracefile)).unwrap();
-    }
     }
     Ok(())
 }

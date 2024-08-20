@@ -223,10 +223,20 @@ pub fn add_func_calls<'a>(
                             if let Some(mod_offset) = map.get_code_addr(inline_mod_idx) {
                                 for line in lines {
                                     // see if line at function start
-                                    let func_at = map.sdi_vec.iter()
-                                    .filter_map(|sdi| if sdi.path_idx == line.path_idx {
-                                        sdi.functions.iter().filter(|sdi_func| line.address == sdi_func.3 ).next()
-                                    } else {None} ).next() ;
+                                    let func_at = map
+                                        .sdi_vec
+                                        .iter()
+                                        .filter_map(|sdi| {
+                                            if sdi.path_idx == line.path_idx {
+                                                sdi.functions
+                                                    .iter()
+                                                    .filter(|sdi_func| line.address == sdi_func.3)
+                                                    .next()
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .next();
 
                                     if line_addrs_inserted.contains(&(line.address)) {
                                         continue;
@@ -242,9 +252,7 @@ pub fn add_func_calls<'a>(
                                     )
                                     .unwrap();
 
-                                    let hexes =  binary_offset_re
-                                    .captures_iter(txt_line)
-                                    .map(|c| {
+                                    let hexes = binary_offset_re.captures_iter(txt_line).map(|c| {
                                         let m = c.name("hex").unwrap();
                                         let bin_offset =
                                             u64::from_str_radix(m.as_str(), 16).unwrap();
@@ -253,23 +261,30 @@ pub fn add_func_calls<'a>(
                                         (bin_offset, txt_offset)
                                     });
 
-                                    let text_offset = if func_at.is_some() && hexes.filter(|(off, _)| *off >= func_at.unwrap().3 + mod_offset as u64).count() > 0 {
+                                    let text_offset = if func_at.is_some()
+                                        && hexes
+                                            .filter(|(off, _)| {
+                                                *off >= func_at.unwrap().3 + mod_offset as u64
+                                            })
+                                            .count()
+                                            > 0
+                                    {
                                         println!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", spans.first().unwrap().offset() , func.span.offset(), func_at.unwrap().2, line);
-                                        
-                                        spans.first().unwrap().offset() 
+
+                                        spans.first().unwrap().offset()
                                     } else {
                                         let Some(text_offset) = binary_offset_re
-                                        .captures_iter(txt_line)
-                                        .map(|c| {
-                                            let m = c.name("hex").unwrap();
-                                            let bin_offset =
-                                                u64::from_str_radix(m.as_str(), 16).unwrap();
-                                            let m_whole = c.name("whole").unwrap();
-                                            let txt_offset = m_whole.end();
-                                            (bin_offset, txt_offset)
-                                        })
-                                        .filter(|(x, _)| *x == true_bin_addr)
-                                        .min_by(|(b1, _), (b2, _)| b1.cmp(b2))
+                                            .captures_iter(txt_line)
+                                            .map(|c| {
+                                                let m = c.name("hex").unwrap();
+                                                let bin_offset =
+                                                    u64::from_str_radix(m.as_str(), 16).unwrap();
+                                                let m_whole = c.name("whole").unwrap();
+                                                let txt_offset = m_whole.end();
+                                                (bin_offset, txt_offset)
+                                            })
+                                            .filter(|(x, _)| *x == true_bin_addr)
+                                            .min_by(|(b1, _), (b2, _)| b1.cmp(b2))
                                         else {
                                             continue;
                                         };

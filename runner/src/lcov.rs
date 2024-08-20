@@ -24,13 +24,19 @@ impl SourceFile {
     pub fn new(counter_log: &GCovFile, sdi: &SourceDebugInfo) -> SourceFile {
         let path = counter_log.clone_src_file();
         let version = None;
-        let functions = sdi.functions.iter().map(|(start, end, str, _addr)| (*start, *end, str.clone())).collect::<Vec<_>>();
+        let functions = sdi
+            .functions
+            .iter()
+            .map(|(start, end, str, _addr)| (*start, *end, str.clone()))
+            .collect::<Vec<_>>();
         let func_exces = functions
             .iter()
             .enumerate()
             .map(|(idx, (start, _, _))| {
                 let counters = counter_log.get_counters_for_line(*start);
-                if counters.is_none() { eprintln!("FUNCTION LINE HAS NO COUNTERS!"); }
+                if counters.is_none() {
+                    eprintln!("FUNCTION LINE HAS NO COUNTERS!");
+                }
                 (counters.unwrap(), idx)
             })
             .collect::<Vec<_>>();

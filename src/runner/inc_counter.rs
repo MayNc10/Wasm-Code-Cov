@@ -1,9 +1,9 @@
 //! This module contains the code for the `inc-counter` function that modified Wasm component will call out to
 use std::fmt::Display;
 
+use crate::annotator::CounterType;
 use colored::Colorize;
 use wasmtime::StoreContextMut;
-use crate::annotator::CounterType;
 
 use crate::runner::{gcov::GCovFile, store, ConstantIterator};
 

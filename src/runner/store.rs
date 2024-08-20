@@ -1,8 +1,8 @@
 //! This module provides the `MyState` struct for storing state while running a Wasm component
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
 use crate::annotator::data::DebugDataArc;
+use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
 
 use crate::runner::gcov::GCovFile;
 

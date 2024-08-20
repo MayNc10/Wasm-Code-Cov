@@ -11,13 +11,13 @@ pub mod inc_counter;
 pub mod lcov;
 pub mod store;
 
+use crate::annotator::data::*;
 use component::{Component, ResourceTable};
 use gcov::GCovFile;
 use store::MyState;
 use wasmtime::*;
 use wasmtime_wasi::bindings::sync::exports::wasi::cli::run::GuestPre;
-use wasmtime_wasi::{WasiCtxBuilder};
-use crate::annotator::data::*;
+use wasmtime_wasi::WasiCtxBuilder;
 
 // There's definitely a faster way to write this, but I like writing code :3
 
@@ -101,11 +101,8 @@ pub fn run(
     let instance = linker.instantiate(&mut store, &component)?;
     let guest = GuestPre::new(&component)?.load(&mut store, &instance)?;
 
-    let exit_code = guest
-        .call_run(&mut store)?;
-    if exit_code.is_err() {
-        
-    }
+    let exit_code = guest.call_run(&mut store)?;
+    if exit_code.is_err() {}
 
     if let Some(outputs) = files_to_output {
         if let Some(output_files) = output {

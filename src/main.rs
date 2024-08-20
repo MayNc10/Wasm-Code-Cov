@@ -9,11 +9,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Parser};
-use colored::Colorize;
 use wasmprinter::{Config, PrintFmtWrite};
 use wast::core::EncodeOptions;
 use wast::parser::{parse, ParseBuffer};
 use wast::Wat;
+use wcov::printer::println_wcov_dbg;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     if !cli.build_dir.exists() {
         if cli.verbose {
-            println!("{} Creating build directory", "WCOV:".red());
+            println_wcov_dbg("Creating build directory");
         }
         fs::create_dir_all(&cli.build_dir)?;
     } else {
@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if cli.verbose {
-        println!("{} Converting binary to WAT", "WCOV:".red());
+        println_wcov_dbg("Converting binary to WAT");
     }
     let binary = fs::read(cli.path.clone())?;
     let mut wat = PrintFmtWrite(String::new());
@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     printer_cfg.print(&binary, &mut wat)?;
     let wat = wat.0;
     if cli.verbose {
-        println!("{} Modifying WAT", "WCOV".red());
+        println_wcov_dbg("Modifying WAT")
     }
     let (output_wat, data) =
         wcov::annotator::modify_wasm(None, Some(wat), Some(cli.path), cli.verbose)?;
@@ -77,13 +77,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let buf = ParseBuffer::new(&output_wat)?;
     let mut output_wat = parse::<Wat>(&buf)?;
     if cli.verbose {
-        println!("{} Encoding WAT to WASM", "WCOV:".red());
+        println_wcov_dbg("Encoding WAT to WASM")
     }
     let opts = EncodeOptions::default();
     let output_binary = opts.encode_wat(&mut output_wat)?;
 
     if cli.verbose {
-        println!("{} Creating output paths", "WCOV".red());
+        println_wcov_dbg("Creating output paths");
     }
     // create paths
     let output_paths = cli
@@ -98,7 +98,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let tracefile_path = cli.build_dir.join("wcov.info");
 
     if cli.verbose {
-        println!("{} Calling Runner", "WCOV".red());
+        println_wcov_dbg("Calling runner");
     }
     wcov::runner::run(
         output_binary,

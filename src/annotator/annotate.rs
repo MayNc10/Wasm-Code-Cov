@@ -12,6 +12,7 @@ use crate::annotator::data::DebugDataOwned;
 use crate::annotator::debug::{find_code_offsets, read_dbg_info, SourceDebugInfo, WatLineMapper};
 use crate::annotator::offset_tracker::OffsetTracker;
 use crate::annotator::utils::*;
+use crate::printer::{println_annotate_dbg, println_annotate_error};
 
 const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
 const BINARY_OFFSET_REGEX_STR: &str = r"(?P<whole>\(;@(?P<hex>[0-9a-f]+)\s*;\))";
@@ -198,7 +199,7 @@ pub fn add_func_calls<'a>(
                             continue;
                         }
                         if verbose {
-                            println!("Func defined @{}", func.span.offset());
+                            println_annotate_dbg(format!("Func defined @{}", func.span.offset()));
                         }
 
                         if let wast::core::FuncKind::Inline {
@@ -279,8 +280,8 @@ pub fn add_func_calls<'a>(
                                             > 0
                                         {
                                             if verbose {
-                                                println!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", 
-                                                spans.first().unwrap().offset() , func.span.offset(), func_at.unwrap().2, line);
+                                                println_annotate_dbg(format!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", 
+                                                spans.first().unwrap().offset() , func.span.offset(), func_at.unwrap().2, line));
                                             }
 
                                             spans.first().unwrap().offset()
@@ -439,7 +440,7 @@ pub fn bump_comp_func_idxs(
             ComponentField::Instance(i) => {
                 if let InstanceKind::Instantiate { component, args } = &i.kind {
                     if verbose {
-                        println!("comp: {:?}, args: {:?}", component, args);
+                        println_annotate_dbg(format!("comp: {:?}, args: {:?}", component, args));
                     }
                     for arg in args {
                         match &arg.kind {
@@ -605,7 +606,10 @@ pub fn process_blacklist<'a, 'b: 'a>(
     // Now we go through each func,
     while let Some((mod_idx, func)) = queue.pop() {
         if verbose {
-            println!("Blacklisting func id: {:?}, name: {:?}", func.id, func.name);
+            println_annotate_dbg(format!(
+                "Blacklisting func id: {:?}, name: {:?}",
+                func.id, func.name
+            ));
         }
 
         if let wast::core::FuncKind::Inline {
@@ -642,16 +646,16 @@ pub fn process_blacklist<'a, 'b: 'a>(
                     todo!()
                 }
             } else {
-                println!("Module index: ${:?}", mod_idx);
+                println_annotate_dbg(format!("Module index: ${:?}", mod_idx));
                 todo!()
             }
 
             blacklist.push((mod_idx, func));
             if verbose {
-                println!(
+                println_annotate_dbg(format!(
                     "Finished blacklisting func id: {:?}, name: {:?}",
                     func.id, func.name
-                );
+                ));
             }
         }
     }
@@ -663,7 +667,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
 fn map_idx_to_module<'a, 'b: 'a>(
     wat: &'a Wat,
     blacklist: Vec<Index<'a>>,
-    verbose: bool,
+    _verbose: bool,
 ) -> parser::Result<Vec<(Index<'a>, &'a str)>> {
     let mut out = Vec::new();
     let mut core_func_idx = 0;
@@ -698,9 +702,7 @@ fn map_idx_to_module<'a, 'b: 'a>(
                 }
             }
             ComponentField::CoreFunc(_) => {
-                if verbose {
-                    eprintln!("TODO: parse core func");
-                }
+                println_annotate_error("TODO: parse core func");
                 core_func_idx += 1;
             }
             ComponentField::CoreInstance(i) => match &i.kind {
@@ -812,7 +814,10 @@ pub fn add_instantiaion_arg(
         if let ComponentField::CoreInstance(ci) = field {
             if let CoreInstanceKind::Instantiate { .. } = &ci.kind {
                 if verbose {
-                    println!("Core instance: {ci:?}, offset: {}", ci.span.offset());
+                    println_annotate_dbg(format!(
+                        "Core instance: {ci:?}, offset: {}",
+                        ci.span.offset()
+                    ));
                 }
                 // parse with regex
                 let msg = format!(

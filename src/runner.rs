@@ -12,6 +12,7 @@ pub mod lcov;
 pub mod store;
 
 use crate::annotator::data::*;
+use crate::printer::{println_runner_dbg, println_runner_error};
 use component::{Component, ResourceTable};
 use gcov::GCovFile;
 use store::MyState;
@@ -102,7 +103,9 @@ pub fn run(
     let guest = GuestPre::new(&component)?.load(&mut store, &instance)?;
 
     let exit_code = guest.call_run(&mut store)?;
-    if exit_code.is_err() {}
+    if exit_code.is_err() {
+        println_runner_error("Wasm exit code was error");
+    }
 
     if let Some(outputs) = files_to_output {
         if let Some(output_files) = output {
@@ -117,17 +120,15 @@ pub fn run(
                 {
                     fs::write(output_files[idx].as_path(), format!("{}", gcov)).unwrap();
                 } else {
-                    eprintln!(
-                        "Requested output file not found in source files! Requested file: {}, source files: {:?}",
-                        file.display(), store.data().gcov_files.as_ref().unwrap().keys()
-                    );
+                    println_runner_error(format!("Requested output file not found in source files! Requested file: {}, source files: {:?}",
+                        file.display(), store.data().gcov_files.as_ref().unwrap().keys()));
                 }
             }
         } else {
             for path in &outputs {
                 let gcov =
                     &store.data().gcov_files.as_ref().unwrap()[&path.canonicalize().unwrap()];
-                println!("{}:\n{}", path.display(), gcov);
+                println_runner_dbg(format!("{}:\n{}", path.display(), gcov));
             }
         }
 
@@ -144,11 +145,14 @@ pub fn run(
                 let file_path = file_path.canonicalize().unwrap();
                 let gcov = files.get(&file_path).unwrap();
                 if verbose {
-                    println!("Adding file to tracefile: {}", file_path.display());
+                    println_runner_dbg(format!(
+                        "Adding file to tracefile: {}",
+                        file_path.display()
+                    ));
                 }
                 if let Some(sdi) = debug_data.get_sdi_from_file(&file_path) {
                     if verbose {
-                        println!("Creating SDI");
+                        println_runner_dbg("Creating SDI");
                     }
                     let source_file = lcov::SourceFile::new(gcov, sdi);
                     source_files.push(source_file);

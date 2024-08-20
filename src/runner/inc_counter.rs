@@ -1,7 +1,7 @@
 //! This module contains the code for the `inc-counter` function that modified Wasm component will call out to
 use std::fmt::Display;
 
-use crate::annotator::CounterType;
+use crate::printer::println_runner_dbg;
 use colored::Colorize;
 use wasmtime::StoreContextMut;
 
@@ -13,13 +13,7 @@ pub fn inc_counter(
     args: (i32, i32, i32, i32, i32),
     verbose: bool,
 ) -> wasmtime::Result<()> {
-    let (idx, ty, file_idx, line_num, col_num) = (
-        args.0 as usize,
-        CounterType::from_i32(args.1).unwrap(),
-        args.2 as usize,
-        args.3,
-        args.4,
-    );
+    let (idx, file_idx, line_num, col_num) = (args.0 as usize, args.2 as usize, args.3, args.4);
     let counters = &mut store.data_mut().counters;
     if counters.len() <= idx {
         counters.extend(ConstantIterator::<i32>::new_default_value(
@@ -44,14 +38,12 @@ pub fn inc_counter(
     };
 
     if verbose {
-        println!(
-            "{} {} {} {} {}",
-            "RUNNER:".red(),
-            format!("Accessed idx #{}, type:", idx).dimmed(),
-            format!("%{}", ty).green(),
+        println_runner_dbg(format!(
+            "{}{} {}",
+            format!("Accessed idx #{}", idx).dimmed(),
             ", source line number:".dimmed(),
             format!("@{}:{}:{}", file, line_num, col_num).yellow(),
-        );
+        ))
     }
 
     Ok(())

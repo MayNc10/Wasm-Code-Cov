@@ -23,7 +23,7 @@ pub trait DebugData {
         let map = self.blocks_per_line();
         for idx in 0.. {
             if let Some(path) = self.file_map_idx(idx) {
-                println!("FileL {}", path.display());
+                println!("File: {}", path.display());
                 let counter_list = map.get(&idx).unwrap();
                 for (line, count) in counter_list {
                     println!("\t@{}:#{}", line, count);

@@ -4,6 +4,7 @@ use std::{fmt::Display, path::PathBuf, sync::Arc};
 
 use crate::annotator::debug::SourceDebugInfo;
 
+use crate::printer::println_wcov_error;
 use crate::runner::gcov::GCovFile;
 
 type FuncDef = (u64, Option<u64>, String); // line num of func start, func end, and name
@@ -40,12 +41,12 @@ impl SourceFile {
             .map(|(idx, (start, _, _))| {
                 let counters = counter_log.get_counters_for_line(*start);
                 if counters.is_none() {
-                    eprintln!("Error: function line has no counters");
+                    println_wcov_error("lcov error: function line has no counters");
                 }
                 (counters.unwrap(), idx)
             })
             .collect::<Vec<_>>();
-        eprintln!("TODO: output branch info");
+        println_wcov_error("TODO: output branch info");
         let branch_coverage = Vec::new();
         let last_line = functions
             .iter()

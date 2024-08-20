@@ -12,6 +12,7 @@ use wast::{parser, Error};
 
 use crate::annotator::data::DebugDataOwned;
 use crate::annotator::utils::*;
+use crate::printer::{println_annotate_dbg, println_annotate_error};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 /// This struct represents debugging infomation about a specific line of Wasm code
@@ -184,10 +185,10 @@ pub fn read_dbg_info(
                 let mut iter = dwarf.units();
                 while let Some(header) = iter.next().unwrap() {
                     if verbose {
-                        println!(
+                        println_annotate_dbg(format!(
                             "Unit at <.debug_info+0x{:x}>",
                             header.offset().as_debug_info_offset().unwrap().0
-                        );
+                        ));
                     }
                     let unit = dwarf.unit(header).unwrap();
                     let unit = unit.unit_ref(&dwarf);
@@ -197,7 +198,7 @@ pub fn read_dbg_info(
                     while let Some((_, entry)) = entries.next_dfs().unwrap() {
                         if entry.tag() == gimli::DW_TAG_subprogram {
                             if verbose {
-                                println!("Found a function: {:?}", entry);
+                                println_annotate_dbg(format!("Found a function: {:?}", entry));
                             }
                             let low_pc =
                                 entry.attr(gimli::DW_AT_low_pc).unwrap().map(|pc| {
@@ -226,13 +227,13 @@ pub fn read_dbg_info(
                                     .map(|s| str::from_utf8(s.slice()).unwrap())
                             });
                             if low_pc.is_some() && verbose {
-                                println!(
+                                println_annotate_dbg(format!(
                                     "low pc: {:x}, high pc: {:x}, name: {:?}, file: {:?}",
                                     low_pc.unwrap(),
                                     low_pc.unwrap() + offset.unwrap(),
                                     name,
                                     file
-                                );
+                                ));
                             }
                             // we can maybe just say file is the current vec len? othrwise map the map a hash
                             if low_pc.is_some()
@@ -250,7 +251,7 @@ pub fn read_dbg_info(
                                 funcs.push(func_pair);
                             }
                             if verbose {
-                                println!("SDI DWARF IDX: {:?}", file);
+                                println_annotate_dbg(format!("SDI DWARF IDX: {:?}", file));
                             }
                         }
                     }
@@ -269,7 +270,10 @@ pub fn read_dbg_info(
                             if row.end_sequence() {
                                 // End of sequence indicates a possible gap in addresses.
                                 if verbose {
-                                    println!("{:x} end-sequence", row.address());
+                                    println_annotate_dbg(format!(
+                                        "{:x} end-sequence",
+                                        row.address()
+                                    ));
                                 }
                             } else {
                                 // Determine the path. Real applications should cache this for performance.
@@ -310,8 +314,10 @@ pub fn read_dbg_info(
                                         );
                                     }
                                 }
-                                if path_idx.is_none() && verbose {
-                                    eprintln!("Error: Unable to resolved source file path");
+                                if path_idx.is_none() {
+                                    println_annotate_error(
+                                        "Error: Unable to resolved source file path",
+                                    );
                                     continue;
                                 }
                                 let path_idx = path_idx.unwrap();
@@ -328,13 +334,13 @@ pub fn read_dbg_info(
                                 };
 
                                 if verbose {
-                                    println!(
+                                    println_annotate_dbg(format!(
                                         "{:x} {}:{}:{}",
                                         row.address(),
                                         map.file_map[path_idx].display(),
                                         line,
                                         column
-                                    );
+                                    ));
                                 }
 
                                 let info = DebugLineInfo {
@@ -376,11 +382,9 @@ pub fn read_dbg_info(
                                     .min_by(|dli1, dli2| dli1.address.cmp(&dli2.address));
 
                                 if start_line.is_none() {
-                                    if verbose {
-                                        eprintln!(
-                                            "Error: no valid dli found for function definition"
-                                        );
-                                    }
+                                    println_annotate_error(
+                                        "Error: no valid dli found for function definition",
+                                    );
                                     continue 'func;
                                 }
 
@@ -393,7 +397,10 @@ pub fn read_dbg_info(
                                         .line
                                 });
                                 if verbose {
-                                    println!("Mapped to {}, {:?}", start_line.line, end_line);
+                                    println_annotate_dbg(format!(
+                                        "Mapped to {}, {:?}",
+                                        start_line.line, end_line
+                                    ));
                                 }
                                 let func = (start_line.line, end_line, func.2, start_line.address);
 
@@ -411,8 +418,8 @@ pub fn read_dbg_info(
                                     branches: Vec::new(),
                                 };
                                 map.sdi_vec.push(sdi);
-                            } else if verbose {
-                                eprintln!("Error: SDI file had no entry in file map")
+                            } else {
+                                println_annotate_error("Error: SDI file had no entry in file map")
                             }
                         }
                     }

@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("{} Modifying WAT", "WCOV".red());
     }
     let (output_wat, data) =
-        wat_annotator::modify_wasm(None, Some(wat), Some(cli.path), cli.verbose)?;
+        wcov::annotator::modify_wasm(None, Some(wat), Some(cli.path), cli.verbose)?;
 
     if cli.dump_data {
         // output data to build folder
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if cli.verbose {
         println!("{} Calling Runner", "WCOV".red());
     }
-    runner::run(
+    wcov::runner::run(
         output_binary,
         Some(data),
         Some(HashMap::new()),

@@ -2,9 +2,9 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiView};
-use wat_annotator::data::DebugDataArc;
+use crate::annotator::data::DebugDataArc;
 
-use crate::gcov::GCovFile;
+use crate::runner::gcov::GCovFile;
 
 /// This struct holds all the state for running a wasm component under testing
 pub struct MyState {

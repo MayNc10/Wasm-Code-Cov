@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, fmt::Display, fs, path::PathBuf, sync::Arc};
 
-use wat_annotator::data::DebugDataArc;
+use crate::annotator::data::DebugDataArc;
 
 /// A type alias for a u64, used to make what certain arguments are used for more obvious. This type is used for the line number in a source file.
 pub type LineIndex = u64;

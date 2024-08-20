@@ -3,9 +3,9 @@ use std::fmt::Display;
 
 use colored::Colorize;
 use wasmtime::StoreContextMut;
-use wat_annotator::CounterType;
+use crate::annotator::CounterType;
 
-use crate::{gcov::GCovFile, store, ConstantIterator};
+use crate::runner::{gcov::GCovFile, store, ConstantIterator};
 
 /// The `inc-counter` function that modified Wasm component will call out to
 pub fn inc_counter(

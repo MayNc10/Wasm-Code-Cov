@@ -2,9 +2,9 @@
 
 use std::{fmt::Display, path::PathBuf, sync::Arc};
 
-use wat_annotator::debug::SourceDebugInfo;
+use crate::annotator::debug::SourceDebugInfo;
 
-use crate::gcov::GCovFile;
+use crate::runner::gcov::GCovFile;
 
 type FuncDef = (u64, Option<u64>, String); // line num of func start, func end, and name
 #[allow(dead_code)]

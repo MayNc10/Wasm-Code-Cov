@@ -15,8 +15,9 @@ use component::{Component, ResourceTable};
 use gcov::GCovFile;
 use store::MyState;
 use wasmtime::*;
-use wasmtime_wasi::{bindings::sync::exports::wasi::cli::run::Guest, WasiCtxBuilder};
-use wat_annotator::data::*;
+use wasmtime_wasi::bindings::sync::exports::wasi::cli::run::GuestPre;
+use wasmtime_wasi::{WasiCtxBuilder};
+use crate::annotator::data::*;
 
 // There's definitely a faster way to write this, but I like writing code :3
 
@@ -59,7 +60,7 @@ use std::collections::HashMap;
 
 use std::sync::Arc;
 
-/// Takes all the same arguments as the CLI tool, and runs a Wasm component under testing
+/// Runs a Wasm component under testing
 pub fn run(
     bytes: Vec<u8>,
     file_map: Option<DebugDataOwned>,
@@ -98,15 +99,13 @@ pub fn run(
     let component = Component::new(&engine, &bytes)?;
 
     let instance = linker.instantiate(&mut store, &component)?;
-    let mut exports = instance.exports(&mut store);
-    let guest = Guest::new(&mut exports.instance("wasi:cli/run@0.2.0").ok_or(
-        wasmtime::Error::msg("couldn't find export instance wasi:run!"),
-    )?)?;
-    drop(exports); // sucks -_-
+    let guest = GuestPre::new(&component)?.load(&mut store, &instance)?;
 
-    guest
-        .call_run(&mut store)?
-        .map_err(|_| wasmtime::Error::msg("running code returned error"))?;
+    let exit_code = guest
+        .call_run(&mut store)?;
+    if exit_code.is_err() {
+        
+    }
 
     if let Some(outputs) = files_to_output {
         if let Some(output_files) = output {

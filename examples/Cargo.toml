@@ -1,0 +1,3 @@
+[workspace]
+members = ["example-component"]
+resolver = "1"

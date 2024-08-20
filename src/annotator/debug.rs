@@ -10,8 +10,8 @@ use wast::core::{Custom, ModuleField};
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
-use crate::data::DebugDataOwned;
-use crate::utils::*;
+use crate::annotator::data::DebugDataOwned;
+use crate::annotator::utils::*;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 /// This struct represents debugging infomation about a specific line of Wasm code

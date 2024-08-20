@@ -1,13 +1,20 @@
-[workspace]
-members = ["wat-annotator", "runner", "wcov"]
-resolver = "1"
+[package]
+name = "wcov"
+version = "0.1.0"
+edition = "2021"
 
-[workspace.dependencies]
-clap = { version = "4.5.8", features = ["derive"] }
-colored = "2.0.0"
-wasmtime = { version = "22.0.0", features = ["runtime", "component-model"] }
-wasmparser = "0.212.0"
-wast = "212.0.0"
-serde = { version = "1.0.204", features = ["derive"] }
-# use json for now, we can change to a different serialization format at basically any time
+[dependencies]
+clap = {version = "4.5", features = ["derive"]}
+colored = "2.1.0"
+#runner = {path = "../runner"}
 serde_json = "1.0"
+wasmparser = "0.215.0"
+wasmprinter = "0.215.0"
+wast = "215.0.0"
+#wat-annotator = {path = "../wat-annotator"}
+gimli = "0.31.0"
+itertools = "0.13.0"
+regex = "1.10.6"
+serde = "1.0.208"
+wasmtime = { version = "24.0.0", features = ["runtime", "component-model"] }
+wasmtime-wasi = "24.0.0"

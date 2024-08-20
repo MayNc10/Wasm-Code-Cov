@@ -8,10 +8,10 @@ use wast::token::Index;
 use wast::{component::*, Wat};
 use wast::{parser, Error};
 
-use crate::data::DebugDataOwned;
-use crate::debug::{find_code_offsets, read_dbg_info, SourceDebugInfo, WatLineMapper};
-use crate::offset_tracker::OffsetTracker;
-use crate::utils::*;
+use crate::annotator::data::DebugDataOwned;
+use crate::annotator::debug::{find_code_offsets, read_dbg_info, SourceDebugInfo, WatLineMapper};
+use crate::annotator::offset_tracker::OffsetTracker;
+use crate::annotator::utils::*;
 
 const INSTANTIATION_REGEX_STR: &str = r"core instance \(;[0-9]+;\) \(instantiate [0-9]+";
 const BINARY_OFFSET_REGEX_STR: &str = r"(?P<whole>\(;@(?P<hex>[0-9a-f]+)\s*;\))";

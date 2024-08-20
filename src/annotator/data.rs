@@ -7,7 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::debug::SourceDebugInfo;
+use crate::annotator::debug::SourceDebugInfo;
 
 /// A trait to consildate functions across the two types of DebugData structs
 pub trait DebugData {

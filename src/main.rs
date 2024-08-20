@@ -16,8 +16,13 @@ use wast::Wat;
 use wcov::noise::NoiseLevel;
 use wcov::printer::println_wcov_dbg;
 
+const ABOUT: &str = "wcov is a tool for generating lcov/gcov style coverage reports from Wasm modules or components. 
+To test Wasm code, run wcov --path <WASM_FILE> --build-dir <BUILD_DIR> --output-files <OUTPUT_FILES>. 
+wcov will embed debugging host functions into the Wasm code found in <WASM_FILE>, will run the modified code in a debugging environment, 
+collect counter information on the source files listed in <OUTPUT_FILES>, and place generated reports in <BUILD_DIR>"; 
+
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = Some(ABOUT))]
 #[clap(group(
     ArgGroup::new("input")
         .args(&["path", "bytes"])

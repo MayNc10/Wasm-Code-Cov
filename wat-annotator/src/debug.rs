@@ -37,7 +37,7 @@ pub struct WatLineMapper {
     code_offsets: Vec<usize>,
     lines: Vec<DebugLineInfo>,
     file_map: Vec<path::PathBuf>,
-    sdi_vec: Vec<SourceDebugInfo>,
+    pub sdi_vec: Vec<SourceDebugInfo>,
 }
 
 impl WatLineMapper {
@@ -122,10 +122,12 @@ impl WatLineMapper {
                     blocks_per_line.insert(path_idx, vec![(this_line, 1)]);
                 }
             });
+
+        let sdi_vec = self.sdi_vec;//.into_iter().map(|(start, end, str, _addr)| (start, end, str)).collect::<Vec<_>>();
         DebugDataOwned {
             file_map: self.file_map,
             blocks_per_line,
-            sdi_vec: self.sdi_vec,
+            sdi_vec,
         }
     }
 
@@ -351,7 +353,7 @@ pub fn read_dbg_info(
 
                         // Add func refs to sdi
                         'func: for func in funcs {
-                            let (dwarf_file, mut func) = func;
+                            let (dwarf_file, func) = func;
                             // map func addrs to actual lines
                             // maybe we should make the functions before this processing a different struct?
                             
@@ -375,15 +377,15 @@ pub fn read_dbg_info(
 
                             let start_line = dlis_in_mod
                                 .clone()
-                                .filter(|dli| dli.address <= func.0)
-                                .max_by(|dli1, dli2| dli1.address.cmp(&dli2.address));
+                                .filter(|dli| dli.address >= func.0)
+                                .min_by(|dli1, dli2| dli1.address.cmp(&dli2.address));
 
                             if start_line.is_none() {
                                 eprintln!("ERROR: no valid dli found for function definition");
                                 continue 'func;
                             }
                                 
-                            let start_line = start_line.unwrap().line;
+                            let start_line = start_line.unwrap();
                             let end_line = func.1.map(|addr| {
                                 dlis_in_mod
                                     .filter(|dli| dli.address <= addr)
@@ -391,8 +393,8 @@ pub fn read_dbg_info(
                                     .unwrap()
                                     .line
                             });
-                            println!("Mapped to {}, {:?}", start_line, end_line);
-                            func = (start_line, end_line, func.2);
+                            println!("Mapped to {}, {:?}", start_line.line, end_line);
+                            let func = (start_line.line, end_line, func.2, start_line.address);
 
 
                                 // search the SDIs
@@ -436,5 +438,5 @@ pub fn find_code_offsets(input: &[u8]) -> Result<Vec<usize>, BinaryReaderError> 
     Ok(code_offsets)
 }
 
-type FuncDef = (u64, Option<u64>, String); // line num of func start, func end, and name
+type FuncDef = (u64, Option<u64>, String, u64); // line num of func start, func end, and name, (and address for other uses)
 type BranchDef = (u64, bool, u64, u64); // line num, is exception, block idx, branch idx,

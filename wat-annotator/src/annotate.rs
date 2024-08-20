@@ -220,9 +220,14 @@ pub fn add_func_calls<'a>(
                                 .lines()
                                 .iter()
                                 .filter(|dli| dli.code_module_idx == inline_mod_idx);
-                            // TODO ADD MORE LINES TO LINE ADDRS INSERTED
                             if let Some(mod_offset) = map.get_code_addr(inline_mod_idx) {
                                 for line in lines {
+                                    // see if line at function start
+                                    let func_at = map.sdi_vec.iter()
+                                    .filter_map(|sdi| if sdi.path_idx == line.path_idx {
+                                        sdi.functions.iter().filter(|sdi_func| line.address == sdi_func.3 ).next()
+                                    } else {None} ).next() ;
+
                                     if line_addrs_inserted.contains(&(line.address)) {
                                         continue;
                                     }
@@ -237,7 +242,23 @@ pub fn add_func_calls<'a>(
                                     )
                                     .unwrap();
 
-                                    let Some(text_offset) = binary_offset_re
+                                    let hexes =  binary_offset_re
+                                    .captures_iter(txt_line)
+                                    .map(|c| {
+                                        let m = c.name("hex").unwrap();
+                                        let bin_offset =
+                                            u64::from_str_radix(m.as_str(), 16).unwrap();
+                                        let m_whole = c.name("whole").unwrap();
+                                        let txt_offset = m_whole.end();
+                                        (bin_offset, txt_offset)
+                                    });
+
+                                    let text_offset = if func_at.is_some() && hexes.filter(|(off, _)| *off >= func_at.unwrap().3 + mod_offset as u64).count() > 0 {
+                                        println!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", spans.first().unwrap().offset() , func.span.offset(), func_at.unwrap().2, line);
+                                        
+                                        spans.first().unwrap().offset() 
+                                    } else {
+                                        let Some(text_offset) = binary_offset_re
                                         .captures_iter(txt_line)
                                         .map(|c| {
                                             let m = c.name("hex").unwrap();
@@ -247,13 +268,13 @@ pub fn add_func_calls<'a>(
                                             let txt_offset = m_whole.end();
                                             (bin_offset, txt_offset)
                                         })
-                                        .filter(|(bin_off, _)| *bin_off == true_bin_addr)
-                                        .next()
-                                    else {
-                                        continue;
+                                        .filter(|(x, _)| *x == true_bin_addr)
+                                        .min_by(|(b1, _), (b2, _)| b1.cmp(b2))
+                                        else {
+                                            continue;
+                                        };
+                                        text_offset.1 + func.span.offset()
                                     };
-
-                                    let text_offset = text_offset.1 + func.span.offset();
 
                                     let msg = format!(
                                         "i32.const {} i32.const {} i32.const {} i32.const {} i32.const {} call ${}\n",

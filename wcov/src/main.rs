@@ -69,8 +69,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if cli.dump_data {
         // output data to build folder
-        let path = cli.build_dir.join("data.json");
-        fs::write(path, serde_json::to_string_pretty(&data)?)?;
+        let json_path = cli.build_dir.join("data.json");
+        fs::write(json_path, serde_json::to_string_pretty(&data)?)?;
+        let wat_path = cli.build_dir.join("src.wat");
+        fs::write(wat_path, &output_wat)?;
     }
     let buf = ParseBuffer::new(&output_wat)?;
     let mut output_wat = parse::<Wat>(&buf)?;

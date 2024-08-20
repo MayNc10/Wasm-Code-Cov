@@ -34,7 +34,7 @@ pub struct WatLineMapper {
     code_offsets: Vec<usize>,
     lines: Vec<DebugLineInfo>,
     file_map: Vec<path::PathBuf>,
-    /// A list of `SourceDebugInfo` structs 
+    /// A list of `SourceDebugInfo` structs
     pub sdi_vec: Vec<SourceDebugInfo>,
 }
 
@@ -186,7 +186,7 @@ pub fn read_dbg_info(
                 let mut iter = dwarf.units();
                 while let Some(header) = iter.next().unwrap() {
                     if verbose {
-                        eprintln!(
+                        println!(
                             "Unit at <.debug_info+0x{:x}>",
                             header.offset().as_debug_info_offset().unwrap().0
                         );
@@ -197,8 +197,10 @@ pub fn read_dbg_info(
                     let mut entries = unit.entries();
                     let mut funcs = Vec::new();
                     while let Some((_, entry)) = entries.next_dfs().unwrap() {
-                        if verbose && entry.tag() == gimli::DW_TAG_subprogram {
-                            eprintln!("Found a function: {:?}", entry);
+                        if entry.tag() == gimli::DW_TAG_subprogram {
+                            if verbose {
+                                println!("Found a function: {:?}", entry);
+                            }
                             let low_pc =
                                 entry.attr(gimli::DW_AT_low_pc).unwrap().map(|pc| {
                                     match pc.value() {
@@ -225,8 +227,8 @@ pub fn read_dbg_info(
                                     })
                                     .map(|s| str::from_utf8(s.slice()).unwrap())
                             });
-                            if low_pc.is_some() {
-                                eprintln!(
+                            if low_pc.is_some() && verbose {
+                                println!(
                                     "low pc: {:x}, high pc: {:x}, name: {:?}, file: {:?}",
                                     low_pc.unwrap(),
                                     low_pc.unwrap() + offset.unwrap(),
@@ -249,7 +251,9 @@ pub fn read_dbg_info(
                                 );
                                 funcs.push(func_pair);
                             }
-                            eprintln!("SDI DWARF IDX: {:?}", file);
+                            if verbose {
+                                println!("SDI DWARF IDX: {:?}", file);
+                            }
                         }
                     }
 
@@ -267,7 +271,7 @@ pub fn read_dbg_info(
                             if row.end_sequence() {
                                 // End of sequence indicates a possible gap in addresses.
                                 if verbose {
-                                    eprintln!("{:x} end-sequence", row.address());
+                                    println!("{:x} end-sequence", row.address());
                                 }
                             } else {
                                 // Determine the path. Real applications should cache this for performance.
@@ -309,7 +313,7 @@ pub fn read_dbg_info(
                                     }
                                 }
                                 if path_idx.is_none() && verbose {
-                                    eprintln!("ERROR: Unable to resolved source file path");
+                                    eprintln!("Error: Unable to resolved source file path");
                                     continue;
                                 }
                                 let path_idx = path_idx.unwrap();
@@ -327,7 +331,7 @@ pub fn read_dbg_info(
                                 let text_offset = row.address() as usize + m.span.offset();
 
                                 if verbose {
-                                    eprintln!(
+                                    println!(
                                         "{:x} (%{:?}) {}:{}:{}",
                                         row.address(),
                                         str::from_utf8(
@@ -338,9 +342,6 @@ pub fn read_dbg_info(
                                         column
                                     );
                                 }
-
-                                //eprintln!("ACTUAL PATH IDX: {}", path_idx);
-                                //eprintln!("LINE NUMBER DWARF PATH IDX: {}", program.header().)
 
                                 let info = DebugLineInfo {
                                     address: row.address(),
@@ -381,7 +382,11 @@ pub fn read_dbg_info(
                                     .min_by(|dli1, dli2| dli1.address.cmp(&dli2.address));
 
                                 if start_line.is_none() {
-                                    eprintln!("ERROR: no valid dli found for function definition");
+                                    if verbose {
+                                        eprintln!(
+                                            "Error: no valid dli found for function definition"
+                                        );
+                                    }
                                     continue 'func;
                                 }
 
@@ -393,7 +398,9 @@ pub fn read_dbg_info(
                                         .unwrap()
                                         .line
                                 });
-                                println!("Mapped to {}, {:?}", start_line.line, end_line);
+                                if verbose {
+                                    println!("Mapped to {}, {:?}", start_line.line, end_line);
+                                }
                                 let func = (start_line.line, end_line, func.2, start_line.address);
 
                                 // search the SDIs
@@ -411,7 +418,9 @@ pub fn read_dbg_info(
                                 };
                                 map.sdi_vec.push(sdi);
                             } else {
-                                eprintln!("SDI FILE HAD NO ENTRY IN FILE MAP!")
+                                if verbose {
+                                    eprintln!("Error: SDI file had no entry in file map")
+                                }
                             }
                         }
                     }

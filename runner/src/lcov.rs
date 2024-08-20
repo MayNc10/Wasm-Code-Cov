@@ -40,12 +40,12 @@ impl SourceFile {
             .map(|(idx, (start, _, _))| {
                 let counters = counter_log.get_counters_for_line(*start);
                 if counters.is_none() {
-                    eprintln!("FUNCTION LINE HAS NO COUNTERS!");
+                    eprintln!("Error: function line has no counters");
                 }
                 (counters.unwrap(), idx)
             })
             .collect::<Vec<_>>();
-        eprintln!("TODO: BRANCH STUFF");
+        eprintln!("TODO: output branch info");
         let branch_coverage = Vec::new();
         let last_line = functions
             .iter()

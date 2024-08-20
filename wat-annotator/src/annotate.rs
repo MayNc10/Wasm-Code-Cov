@@ -202,7 +202,7 @@ pub fn add_func_calls<'a>(
                             continue;
                         }
                         if verbose {
-                            eprintln!("Func defined @{}", func.span.offset());
+                            println!("Func defined @{}", func.span.offset());
                         }
 
                         if let wast::core::FuncKind::Inline {
@@ -274,8 +274,10 @@ pub fn add_func_calls<'a>(
                                             .count()
                                             > 0
                                     {
-                                        println!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", 
+                                        if verbose {
+                                            println!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", 
                                             spans.first().unwrap().offset() , func.span.offset(), func_at.unwrap().2, line);
+                                        }
 
                                         spans.first().unwrap().offset()
                                     } else {
@@ -432,7 +434,7 @@ pub fn bump_comp_func_idxs(
             ComponentField::Instance(i) => match &i.kind {
                 InstanceKind::Instantiate { component, args } => {
                     if verbose {
-                        eprintln!("comp: {:?}, args: {:?}", component, args);
+                        println!("comp: {:?}, args: {:?}", component, args);
                     }
                     for arg in args {
                         match &arg.kind {
@@ -608,7 +610,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
     // Now we go through each func,
     while let Some((mod_idx, func)) = queue.pop() {
         if verbose {
-            eprintln!("Blacklisting func id: {:?}, name: {:?}", func.id, func.name);
+            println!("Blacklisting func id: {:?}, name: {:?}", func.id, func.name);
         }
 
         if let wast::core::FuncKind::Inline {
@@ -627,11 +629,6 @@ pub fn process_blacklist<'a, 'b: 'a>(
                 continue;
             }
 
-            let debug = func.id.is_some_and(|id| id.name() == "allocate_stack") && verbose;
-            if debug {
-                eprintln!("IN CABI REALLOC");
-            }
-
             //  the todos can be here bc like
             // if we already have a funcref then this kinda has to be a core inline module
             // but we can rewrite later
@@ -639,25 +636,13 @@ pub fn process_blacklist<'a, 'b: 'a>(
                 if let CoreModuleKind::Inline { fields } = &mods[num as usize].kind {
                     for instr in &*expression.instrs {
                         if let Instruction::Call(f_idx) = instr {
-                            if debug {
-                                eprintln!("FUNCTION CALL IN CABI REALLOC, IDX: {:?}", f_idx);
-                            }
-
                             // find the function reference, which will be part of the current module
                             let new_func = idx_to_func(*f_idx, fields);
                             if new_func.is_none() {
                                 // Most likely an import
                                 // For now, we can just decide to skip adding it
                                 // We would do this anyway bc once it calls out to an import it's leaving the instance anyway
-                                if debug {
-                                    eprintln!("DIDNT FIND FUNCTION IDX IN MODULE");
-                                }
                                 continue;
-                            } else if debug {
-                                eprintln!(
-                                    "IN CABI REALLOC FUNCTION WAS FOUND, NEW FUNC ID: {:?}",
-                                    new_func.unwrap().id
-                                )
                             }
                             let new_func = new_func.unwrap();
                             queue.push((mod_idx, new_func));
@@ -667,13 +652,13 @@ pub fn process_blacklist<'a, 'b: 'a>(
                     todo!()
                 }
             } else {
-                eprintln!("Module index: ${:?}", mod_idx);
+                println!("Module index: ${:?}", mod_idx);
                 todo!()
             }
 
             blacklist.push((mod_idx, func));
             if verbose {
-                eprintln!(
+                println!(
                     "Finished blacklisting func id: {:?}, name: {:?}",
                     func.id, func.name
                 );
@@ -841,7 +826,7 @@ pub fn add_instantiaion_arg(
             ComponentField::CoreInstance(ci) => match &ci.kind {
                 CoreInstanceKind::Instantiate { .. } => {
                     if verbose {
-                        eprintln!("Core instance: {ci:?}, offset: {}", ci.span.offset());
+                        println!("Core instance: {ci:?}, offset: {}", ci.span.offset());
                     }
                     // parse with regex
                     let msg = format!(

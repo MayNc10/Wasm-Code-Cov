@@ -154,7 +154,7 @@ pub fn run(
                     if verbose {
                         println!("Creating SDI");
                     }
-                    let source_file = lcov::SourceFile::new(&gcov, &sdi);
+                    let source_file = lcov::SourceFile::new(gcov, sdi);
                     source_files.push(source_file);
                 }
             }

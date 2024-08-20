@@ -44,8 +44,8 @@ pub fn add_scaffolding(
     let wat = parse::<Wat>(buf)?;
     let mut total_increment = OffsetTracker::new();
 
-    let binary = if binary.is_some() {
-        binary.unwrap()
+    let binary = if let Some(binary) = binary {
+        binary
     } else {
         Cow::Owned(parse::<Wat>(&ParseBuffer::new(&wat_text)?)?.encode()?)
     };
@@ -91,7 +91,7 @@ pub fn add_inc_import_section(
     let mut was_last_ty_import_alias = false;
     let mut offset = 0;
     let mut type_idx = 0;
-    'field: for field in get_fields(&wat).ok_or(Error::new(
+    'field: for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
@@ -132,7 +132,7 @@ pub fn add_imports_in_module(
     output: &mut String,
     total_increment: &mut OffsetTracker,
 ) -> parser::Result<()> {
-    'comp: for field in get_fields(&wat).ok_or(Error::new(
+    'comp: for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
@@ -185,7 +185,7 @@ pub fn add_func_calls<'a>(
     let mut sdi_iter = None;
     let mut line_addrs_inserted = Vec::new();
     let binary_offset_re = Regex::new(BINARY_OFFSET_REGEX_STR).unwrap();
-    for field in get_fields(&wat).ok_or(Error::new(
+    for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
@@ -194,12 +194,7 @@ pub fn add_func_calls<'a>(
             if let CoreModuleKind::Inline { fields } = &m.kind {
                 'fields: for field in fields {
                     if let ModuleField::Func(func) = field {
-                        if blacklist
-                            .iter()
-                            .filter(|(_, f)| f.span == func.span)
-                            .next()
-                            .is_some()
-                        {
+                        if blacklist.iter().any(|(_, f)| f.span == func.span) {
                             continue;
                         }
                         if verbose {
@@ -243,8 +238,7 @@ pub fn add_func_calls<'a>(
                                         .filter_map(|sdi| {
                                             sdi.functions
                                                 .iter()
-                                                .filter(|sdi_func| line.address == sdi_func.3)
-                                                .next()
+                                                .find(|sdi_func| line.address == sdi_func.3)
                                         })
                                         .next();
 
@@ -344,7 +338,7 @@ pub fn bump_instance_idxs(
     // alias export statements
     // instantiation args
 
-    for field in get_fields(&wat).ok_or(Error::new(
+    for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
@@ -361,30 +355,27 @@ pub fn bump_instance_idxs(
             ComponentField::Instance(i) => {
                 if let InstanceKind::Instantiate { component: _, args } = &i.kind {
                     for arg in args {
-                        if let InstantiationArgKind::Item(cek) = &arg.kind {
+                        if let InstantiationArgKind::Item(ComponentExportKind::Instance(i)) =
+                            &arg.kind
+                        {
                             // Other things here need to be bumped, but that happens in other functions
-                            if let ComponentExportKind::Instance(i) = cek {
-                                // TODO Figure out lower bound flexibly
-                                total_increment.increment_idx(output, i.idx, None);
-                            }
+
+                            // TODO Figure out lower bound flexibly
+                            total_increment.increment_idx(output, i.idx, None);
                         }
                     }
                 }
             }
-            ComponentField::CoreInstance(i) => match &i.kind {
-                CoreInstanceKind::Instantiate { module: _, args } => {
+            ComponentField::CoreInstance(i) => {
+                if let CoreInstanceKind::Instantiate { module: _, args } = &i.kind {
                     for arg in args {
-                        match &arg.kind {
-                            // I think this is the right match for an instance arg
-                            CoreInstantiationArgKind::Instance(iref) => {
-                                total_increment.increment_idx(output, iref.idx, None);
-                            }
-                            _ => {}
+                        // I think this is the right match for an instance arg
+                        if let CoreInstantiationArgKind::Instance(iref) = &arg.kind {
+                            total_increment.increment_idx(output, iref.idx, None);
                         }
                     }
                 }
-                _ => {}
-            },
+            }
 
             _ => {}
         }
@@ -405,15 +396,16 @@ pub fn bump_comp_func_idxs(
     // (instantiate $instance (with "func" (func <idx>)))
     // (instantiate $instance (export "func" (func <idx>)))
 
-    for field in get_fields(&wat).ok_or(Error::new(
+    for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
         match field {
-            ComponentField::CoreFunc(cf) => match &cf.kind {
-                CoreFuncKind::Lower(cl) => total_increment.increment_idx(output, cl.func.idx, None),
-                _ => {}
-            },
+            ComponentField::CoreFunc(cf) => {
+                if let CoreFuncKind::Lower(cl) = &cf.kind {
+                    total_increment.increment_idx(output, cl.func.idx, None)
+                }
+            }
             ComponentField::CoreInstance(i) => match &i.kind {
                 CoreInstanceKind::Instantiate { module: _, args } => {
                     for arg in args {
@@ -424,15 +416,12 @@ pub fn bump_comp_func_idxs(
                             }
                             CoreInstantiationArgKind::BundleOfExports(_, exports) => {
                                 for export in exports {
-                                    match &export.item.kind {
-                                        ExportKind::Func => {
-                                            total_increment.increment_idx(
-                                                output,
-                                                export.item.idx,
-                                                None,
-                                            );
-                                        }
-                                        _ => {}
+                                    if export.item.kind == ExportKind::Func {
+                                        total_increment.increment_idx(
+                                            output,
+                                            export.item.idx,
+                                            None,
+                                        );
                                     }
                                 }
                             }
@@ -441,44 +430,36 @@ pub fn bump_comp_func_idxs(
                 }
                 CoreInstanceKind::BundleOfExports(exps) => {
                     for export in exps {
-                        match export.item.kind {
-                            ExportKind::Func => {
-                                total_increment.increment_idx(output, export.item.idx, None);
-                            }
-                            _ => {}
+                        if export.item.kind == ExportKind::Func {
+                            total_increment.increment_idx(output, export.item.idx, None);
                         }
                     }
                 }
             },
-            ComponentField::Instance(i) => match &i.kind {
-                InstanceKind::Instantiate { component, args } => {
+            ComponentField::Instance(i) => {
+                if let InstanceKind::Instantiate { component, args } = &i.kind {
                     if verbose {
                         println!("comp: {:?}, args: {:?}", component, args);
                     }
                     for arg in args {
                         match &arg.kind {
                             // I think this is the right match for an instance arg
-                            InstantiationArgKind::Item(item) => match item {
-                                ComponentExportKind::Func(cf) => {
+                            InstantiationArgKind::Item(item) => {
+                                if let ComponentExportKind::Func(cf) = item {
                                     total_increment.increment_idx(output, cf.idx, None);
                                 }
-                                _ => {}
-                            },
+                            }
                             InstantiationArgKind::BundleOfExports(_, exports) => {
                                 for export in exports {
-                                    match &export.kind {
-                                        ComponentExportKind::Func(cf) => {
-                                            total_increment.increment_idx(output, cf.idx, None);
-                                        }
-                                        _ => {}
+                                    if let ComponentExportKind::Func(cf) = &export.kind {
+                                        total_increment.increment_idx(output, cf.idx, None);
                                     }
                                 }
                             }
                         }
                     }
                 }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
@@ -497,32 +478,27 @@ pub fn bump_core_func_idxs<'a, 'b: 'a, 'c>(
     // ((canon lift (core func <funcidx>)))
 
     let mut bl = Vec::new();
-    for field in get_fields(&wat).ok_or(Error::new(
+    for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
         match field {
-            ComponentField::CoreFunc(cf) => match &cf.kind {
-                CoreFuncKind::Lower(cl) => {
+            ComponentField::CoreFunc(cf) => {
+                if let CoreFuncKind::Lower(cl) = &cf.kind {
                     // The func contained is a comp func, we want to find the realloc optioon
                     for opt in &cl.opts {
-                        match opt {
-                            CanonOpt::Realloc(re) => {
-                                total_increment.increment_idx(output, re.idx, None);
-                                bl.push(re.idx);
-                            }
-                            _ => {}
+                        if let CanonOpt::Realloc(re) = opt {
+                            total_increment.increment_idx(output, re.idx, None);
+                            bl.push(re.idx);
                         }
                     }
                 }
-                _ => {}
-            },
-            ComponentField::Func(f) => match &f.kind {
-                FuncKind::Lift { ty: _, info } => {
+            }
+            ComponentField::Func(f) => {
+                if let FuncKind::Lift { ty: _, info } = &f.kind {
                     total_increment.increment_idx(output, info.func.idx, None);
                 }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
@@ -550,7 +526,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
 
     let queue = map_idx_to_module(wat, blacklist, verbose)?;
     let mut blacklist: Vec<(Index, &Func)> = Vec::new();
-    let fields = get_fields(&wat).ok_or(Error::new(
+    let fields = get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))?;
@@ -639,12 +615,7 @@ pub fn process_blacklist<'a, 'b: 'a>(
         {
             // we can do this comparison based on spans i think
             // bc they should be unique to the function
-            if blacklist
-                .iter()
-                .filter(|(_, f)| f.span == func.span)
-                .next()
-                .is_some()
-            {
+            if blacklist.iter().any(|(_, f)| f.span == func.span) {
                 continue;
             }
 
@@ -697,27 +668,23 @@ fn map_idx_to_module<'a, 'b: 'a>(
     let mut out = Vec::new();
     let mut core_func_idx = 0;
     let mut core_instances: Vec<Option<&ItemRef<_>>> = Vec::new();
-    for field in get_fields(&wat).ok_or(Error::new(
+    for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
         match field {
-            ComponentField::Alias(a) => match a.target {
-                AliasTarget::CoreExport {
+            ComponentField::Alias(a) => {
+                if let AliasTarget::CoreExport {
                     instance,
                     name,
                     kind,
-                } => {
+                } = a.target
+                {
                     if kind == ExportKind::Func {
-                        if blacklist
-                            .iter()
-                            .filter(|idx| match idx {
-                                Index::Num(num, _) => *num == core_func_idx,
-                                Index::Id(_) => todo!(),
-                            })
-                            .next()
-                            .is_some()
-                        {
+                        if blacklist.iter().any(|idx| match idx {
+                            Index::Num(num, _) => *num == core_func_idx,
+                            Index::Id(_) => todo!(),
+                        }) {
                             // do something with the instance info
                             let idx = match instance {
                                 Index::Num(num, _) => num,
@@ -729,8 +696,7 @@ fn map_idx_to_module<'a, 'b: 'a>(
                         core_func_idx += 1;
                     }
                 }
-                _ => {}
-            },
+            }
             ComponentField::CoreFunc(_) => {
                 if verbose {
                     eprintln!("TODO: parse core func");
@@ -765,7 +731,7 @@ pub fn bump_type_idxs(
     // i think thats it
 
     // TODO compute this instead of hardcoding
-    for field in get_fields(&wat).ok_or(Error::new(
+    for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
@@ -811,16 +777,18 @@ pub fn bump_type_idxs(
             }
             // make this a function in this scope ig
             ComponentField::Type(t) => {
-                let idxs = idxs_in_type(&t);
+                let idxs = idxs_in_type(t);
                 for idx in idxs {
                     total_increment.increment_idx(output, idx, Some(lower_bound));
                 }
             }
             ComponentField::Func(f) => {
-                if let FuncKind::Lift { ty, .. } = &f.kind {
-                    if let ComponentTypeUse::Ref(r) = ty {
-                        total_increment.increment_idx(output, r.idx, Some(lower_bound));
-                    }
+                if let FuncKind::Lift {
+                    ty: ComponentTypeUse::Ref(r),
+                    ..
+                } = &f.kind
+                {
+                    total_increment.increment_idx(output, r.idx, Some(lower_bound));
                 }
             }
             _ => {}
@@ -837,31 +805,27 @@ pub fn add_instantiaion_arg(
     total_increment: &mut OffsetTracker,
     verbose: bool,
 ) -> parser::Result<()> {
-    for field in get_fields(&wat).ok_or(Error::new(
+    for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
-        match field {
-            ComponentField::CoreInstance(ci) => match &ci.kind {
-                CoreInstanceKind::Instantiate { .. } => {
-                    if verbose {
-                        println!("Core instance: {ci:?}, offset: {}", ci.span.offset());
-                    }
-                    // parse with regex
-                    let msg = format!(
-                        "(with \"{}\" (instance ${}))",
-                        INC_MODULE_NAME, INC_MODULE_NAME
-                    );
-                    let re = Regex::new(INSTANTIATION_REGEX_STR).unwrap();
-                    let c = |s: &mut String, _, end| {
-                        s.insert_str(end, &msg);
-                        (end, msg.len())
-                    };
-                    total_increment.modify_with_regex_match(output, &re, ci.span.offset(), c);
+        if let ComponentField::CoreInstance(ci) = field {
+            if let CoreInstanceKind::Instantiate { .. } = &ci.kind {
+                if verbose {
+                    println!("Core instance: {ci:?}, offset: {}", ci.span.offset());
                 }
-                _ => {}
-            },
-            _ => {}
+                // parse with regex
+                let msg = format!(
+                    "(with \"{}\" (instance ${}))",
+                    INC_MODULE_NAME, INC_MODULE_NAME
+                );
+                let re = Regex::new(INSTANTIATION_REGEX_STR).unwrap();
+                let c = |s: &mut String, _, end| {
+                    s.insert_str(end, &msg);
+                    (end, msg.len())
+                };
+                total_increment.modify_with_regex_match(output, &re, ci.span.offset(), c);
+            }
         }
     }
     Ok(())
@@ -881,7 +845,7 @@ pub fn add_canon_lower_and_instance(
 
     let mut has_passed_modules = false;
     let mut offset = None;
-    for field in get_fields(&wat).ok_or(Error::new(
+    for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {

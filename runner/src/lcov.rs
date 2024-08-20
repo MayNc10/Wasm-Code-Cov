@@ -9,8 +9,8 @@ use crate::gcov::GCovFile;
 type FuncDef = (u64, Option<u64>, String); // line num of func start, func end, and name
 #[allow(dead_code)]
 type BranchDef = (u64, bool, u64, u64); // line num, is exception, block idx, branch idx,
-type FNDA = (u64, usize); // execution count, func index
-type BRDA = (u64, bool, u64, u64, u64); // line num, is an exception, block idx, branch idx, times taken
+type Fnda = (u64, usize); // execution count, func index
+type Brda = (u64, bool, u64, u64, u64); // line num, is an exception, block idx, branch idx, times taken
                                         // What lines count as instrumented? idk we should figure that out
 type DA = (u64, u64, Option</*should be an md5 */ u64>); // line num, exec count, hash
 
@@ -19,8 +19,8 @@ pub struct SourceFile {
     path: Arc<PathBuf>,
     version: Option<u64>,
     functions: Vec<FuncDef>,
-    func_exces: Vec<FNDA>,
-    branch_coverage: Vec<BRDA>,
+    func_exces: Vec<Fnda>,
+    branch_coverage: Vec<Brda>,
     code_lines: Vec<DA>,
 }
 
@@ -116,7 +116,7 @@ impl Display for SourceFile {
             if let Some(hash) = instrumented_line.2 {
                 write!(f, ",{}", hash)?;
             }
-            writeln!(f, "")?;
+            writeln!(f)?;
         }
         writeln!(
             f,

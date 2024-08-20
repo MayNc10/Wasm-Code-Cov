@@ -132,7 +132,7 @@ impl WatLineMapper {
     /// Get the code section offset for a particular module
     /// If the module index is out of bounds, `None` is returned
     pub fn get_code_addr(&self, mod_idx: usize) -> Option<usize> {
-        self.code_offsets.get(mod_idx).map(|u| *u)
+        self.code_offsets.get(mod_idx).copied()
     }
 }
 
@@ -151,7 +151,7 @@ pub struct SourceDebugInfo {
 /// The `text` argument should be the plaintext string that the `wat` argument was created from
 pub fn read_dbg_info(
     wat: &Wat,
-    text: &str,
+    _text: &str,
     map: &mut WatLineMapper,
     verbose: bool,
 ) -> parser::Result<()> {
@@ -159,7 +159,7 @@ pub fn read_dbg_info(
     // todo: refactor!
     // This implementation uses *a lot* of cloning, so it's very inefficient
     let mut file_entry_map: HashMap<_, usize> = HashMap::new();
-    for field in get_fields(&wat).ok_or(Error::new(
+    for field in get_fields(wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
     ))? {
@@ -167,12 +167,10 @@ pub fn read_dbg_info(
             if let CoreModuleKind::Inline { fields } = &m.kind {
                 let mut section_map = HashMap::new();
                 for field in fields {
-                    if let ModuleField::Custom(c) = field {
-                        if let Custom::Raw(c) = c {
-                            let flattened_slice: Vec<u8> =
-                                c.data.iter().map(|a| Vec::from(*a)).flatten().collect(); // is there a way to do this without allocating?
-                            section_map.insert(c.name, flattened_slice);
-                        }
+                    if let ModuleField::Custom(Custom::Raw(c)) = field {
+                        let flattened_slice: Vec<u8> =
+                            c.data.iter().flat_map(|a| Vec::from(*a)).collect(); // is there a way to do this without allocating?
+                        section_map.insert(c.name, flattened_slice);
                     }
                 }
                 let dwarf_sections = gimli::DwarfSections::load(|sec| {
@@ -328,15 +326,11 @@ pub fn read_dbg_info(
                                     gimli::ColumnType::LeftEdge => 0,
                                     gimli::ColumnType::Column(column) => column.get(),
                                 };
-                                let text_offset = row.address() as usize + m.span.offset();
 
                                 if verbose {
                                     println!(
-                                        "{:x} (%{:?}) {}:{}:{}",
+                                        "{:x} {}:{}:{}",
                                         row.address(),
-                                        str::from_utf8(
-                                            &text.as_bytes()[text_offset..text_offset + 10]
-                                        ),
                                         map.file_map[path_idx].display(),
                                         line,
                                         column
@@ -417,10 +411,8 @@ pub fn read_dbg_info(
                                     branches: Vec::new(),
                                 };
                                 map.sdi_vec.push(sdi);
-                            } else {
-                                if verbose {
-                                    eprintln!("Error: SDI file had no entry in file map")
-                                }
+                            } else if verbose {
+                                eprintln!("Error: SDI file had no entry in file map")
                             }
                         }
                     }

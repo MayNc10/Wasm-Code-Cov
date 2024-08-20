@@ -22,16 +22,16 @@ pub fn inc_counter(
     );
     let counters = &mut store.data_mut().counters;
     if counters.len() <= idx {
-        counters.extend(
-            ConstantIterator::<i32>::new_default_value(idx - counters.len() + 1).into_iter(),
-        );
+        counters.extend(ConstantIterator::<i32>::new_default_value(
+            idx - counters.len() + 1,
+        ));
     }
     let data = store.data_mut();
     if let Some(map) = data.gcov_files.as_mut() {
         let debug_data = data.debug_data.as_ref().unwrap();
-        let path = &debug_data.file_map[file_idx as usize];
+        let path = &debug_data.file_map[file_idx];
         if !map.contains_key(path) {
-            map.insert(path.clone(), GCovFile::new(&debug_data, file_idx));
+            map.insert(path.clone(), GCovFile::new(debug_data, file_idx));
         }
         let gcov_file = map.get_mut(path).unwrap();
         gcov_file.increment(line_num as u64, col_num as u64);
@@ -49,7 +49,7 @@ pub fn inc_counter(
             "RUNNER:".red(),
             format!("Accessed idx #{}, type:", idx).dimmed(),
             format!("%{}", ty).green(),
-            format!(", source line number:").dimmed(),
+            ", source line number:".dimmed(),
             format!("@{}:{}:{}", file, line_num, col_num).yellow(),
         );
     }

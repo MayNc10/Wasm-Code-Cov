@@ -55,8 +55,8 @@ impl CounterType {
     /// Transforms an i32 into a counter enum if the i32 is a valid variant, otherwise returns false
     /// This allows us to pass simple i32s over the Wasm/host FFI barrier, instead of variants that make the modified Wasm more complicated
     pub fn from_i32(n: i32) -> Option<CounterType> {
-        if n >= 0 && n < NUM_TYPES {
-            Some(unsafe { std::mem::transmute(n) })
+        if (0..NUM_TYPES).contains(&n) {
+            Some(unsafe { std::mem::transmute::<i32, CounterType>(n) })
         } else {
             None
         }

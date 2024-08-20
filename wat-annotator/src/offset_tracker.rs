@@ -97,3 +97,9 @@ impl OffsetTracker {
         str::from_utf8(&output.as_bytes()[loc..]).unwrap()
     }
 }
+
+impl Default for OffsetTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}

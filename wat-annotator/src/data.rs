@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     ops::Deref,
-    path::{self, PathBuf},
+    path::{self, Path},
     sync::Arc,
 };
 
@@ -34,14 +34,11 @@ pub trait DebugData {
         }
     }
     /// Get the SDI matching a file path, if one exists
-    fn get_sdi_from_file(&self, file: &PathBuf) -> Option<&SourceDebugInfo> {
-        self.sdi_vec()
-            .iter()
-            .filter(|sdi| {
-                self.file_map_idx(sdi.path_idx)
-                    .is_some_and(|f| &**f == file.as_path())
-            })
-            .next()
+    fn get_sdi_from_file(&self, file: &Path) -> Option<&SourceDebugInfo> {
+        self.sdi_vec().iter().find(|sdi| {
+            self.file_map_idx(sdi.path_idx)
+                .is_some_and(|f| &**f == file)
+        })
     }
 }
 
@@ -104,7 +101,7 @@ impl DebugData for DebugDataArc {
 impl From<DebugDataOwned> for DebugDataArc {
     fn from(value: DebugDataOwned) -> Self {
         DebugDataArc {
-            file_map: value.file_map.into_iter().map(|p| Arc::new(p)).collect(),
+            file_map: value.file_map.into_iter().map(Arc::new).collect(),
             blocks_per_line: value.blocks_per_line,
             sdi_vec: value.sdi_vec,
         }

@@ -7,3 +7,4 @@ Cargo.lock
 changes.md
 dbg-notes.md
 /build/
+/temp/

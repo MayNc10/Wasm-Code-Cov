@@ -1,8 +1,12 @@
 use core::str;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::path::{self, PathBuf};
+use std::path::{self, Path, PathBuf};
+use std::rc::Rc;
+use std::sync::Arc;
 
+use gimli::LineProgram;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use wasmparser::{BinaryReaderError, Parser, Payload::*};
@@ -13,7 +17,7 @@ use wast::{parser, Error};
 use crate::data::DebugDataOwned;
 use crate::utils::*;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 /// This struct represents debugging infomation about a specific line of Wasm code
 pub struct DebugLineInfo {
     /// The address within the `code` section of the module
@@ -33,6 +37,7 @@ pub struct WatLineMapper {
     code_offsets: Vec<usize>,
     lines: Vec<DebugLineInfo>,
     file_map: Vec<path::PathBuf>,
+    sdi_vec: Vec<SourceDebugInfo>,
 }
 
 impl WatLineMapper {
@@ -42,6 +47,7 @@ impl WatLineMapper {
             code_offsets: offsets,
             lines: Vec::new(),
             file_map: Vec::new(),
+            sdi_vec: Vec::new(),
         }
     }
     /// Add a debug line
@@ -119,6 +125,7 @@ impl WatLineMapper {
         DebugDataOwned {
             file_map: self.file_map,
             blocks_per_line,
+            sdi_vec: self.sdi_vec,
         }
     }
 
@@ -127,6 +134,13 @@ impl WatLineMapper {
     pub fn get_code_addr(&self, mod_idx: usize) -> Option<usize> {
         self.code_offsets.get(mod_idx).map(|u| *u)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SourceDebugInfo {
+    pub path_idx: usize,
+    pub functions: Vec<FuncDef>,
+    pub branches: Vec<BranchDef>,
 }
 
 /// Fill in a mapper struct with debug information contained in a Wat file
@@ -138,6 +152,9 @@ pub fn read_dbg_info(
     verbose: bool,
 ) -> parser::Result<()> {
     let mut code_module_idx = 0;
+    // todo: refactor!
+    // This implementation uses *a lot* of cloning, so it's very inefficient
+    let mut file_entry_map: HashMap<_, usize> = HashMap::new();
     for field in get_fields(&wat).ok_or(Error::new(
         wat.span(),
         "Input WAT file could not be parsed (may be binary or module)".to_string(),
@@ -173,6 +190,65 @@ pub fn read_dbg_info(
                     let unit = dwarf.unit(header).unwrap();
                     let unit = unit.unit_ref(&dwarf);
 
+                    let mut entries = unit.entries();
+                    let mut funcs = Vec::new();
+                    while let Some((_, entry)) = entries.next_dfs().unwrap() {
+                        if verbose && entry.tag() == gimli::DW_TAG_subprogram {
+                            eprintln!("Found a function: {:?}", entry);
+                            let low_pc =
+                                entry.attr(gimli::DW_AT_low_pc).unwrap().map(|pc| {
+                                    match pc.value() {
+                                        gimli::AttributeValue::Addr(addr) => addr,
+                                        _ => panic!(),
+                                    }
+                                });
+                            // The DWARF offset seems to include the 2-byte `Return` instruction
+                            // In order to get the end to point to the end of the function, we subtract 2 bytes
+                            let offset = entry
+                                .attr(gimli::DW_AT_high_pc)
+                                .unwrap()
+                                .map(|pc| pc.value().udata_value().unwrap() - 2);
+                            let file = entry
+                                .attr(gimli::DW_AT_decl_file)
+                                .unwrap()
+                                .map(|f| f.udata_value());
+                            let name = entry.attr(gimli::DW_AT_name).unwrap().map(|name| {
+                                dwarf
+                                    .debug_str
+                                    .get_str(match name.value() {
+                                        gimli::AttributeValue::DebugStrRef(offset) => offset,
+                                        _ => panic!(),
+                                    })
+                                    .map(|s| str::from_utf8(s.slice()).unwrap())
+                            });
+                            if low_pc.is_some() {
+                                eprintln!(
+                                    "low pc: {:x}, high pc: {:x}, name: {:?}, file: {:?}",
+                                    low_pc.unwrap(),
+                                    low_pc.unwrap() + offset.unwrap(),
+                                    name,
+                                    file
+                                );
+                            }
+                            // we can maybe just say file is the current vec len? othrwise map the map a hash
+                            if low_pc.is_some()
+                                && name.is_some_and(|n| n.is_ok())
+                                && file.is_some_and(|f| f.is_some())
+                            {
+                                let func_pair = (
+                                    file.unwrap().unwrap(),
+                                    (
+                                        low_pc.unwrap(),
+                                        offset.map(|off| low_pc.unwrap() + off),
+                                        name.unwrap().unwrap().to_string(),
+                                    ),
+                                );
+                                funcs.push(func_pair);
+                            }
+                            eprintln!("SDI DWARF IDX: {:?}", file);
+                        }
+                    }
+
                     if let Some(program) = unit.line_program.clone() {
                         let comp_dir = if let Some(ref dir) = unit.comp_dir {
                             path::PathBuf::from(dir.to_string_lossy().into_owned())
@@ -181,7 +257,8 @@ pub fn read_dbg_info(
                         };
 
                         // Iterate over the line program rows.
-                        let mut rows = program.rows();
+                        let mut rows = program.clone().rows();
+
                         while let Some((header, row)) = rows.next_row().unwrap() {
                             if row.end_sequence() {
                                 // End of sequence indicates a possible gap in addresses.
@@ -190,29 +267,48 @@ pub fn read_dbg_info(
                                 }
                             } else {
                                 // Determine the path. Real applications should cache this for performance.
-                                let mut path = path::PathBuf::new();
+                                let mut path_idx = None;
                                 if let Some(file) = row.file(header) {
-                                    path.clone_from(&comp_dir);
+                                    let file_name = unit
+                                        .attr_string(file.path_name())
+                                        .unwrap()
+                                        .to_string_lossy();
 
-                                    // The directory index 0 is defined to correspond to the compilation unit directory.
-                                    if file.directory_index() != 0 {
-                                        if let Some(dir) = file.directory(header) {
-                                            path.push(
-                                                unit.attr_string(dir)
-                                                    .unwrap()
-                                                    .to_string_lossy()
-                                                    .as_ref(),
-                                            );
+                                    if let Some(map_path_idx) = file_entry_map
+                                        .get(&(file.directory_index(), file_name.to_string()))
+                                    {
+                                        path_idx = Some(*map_path_idx);
+                                    } else {
+                                        let mut path = path::PathBuf::new();
+                                        path.clone_from(&comp_dir);
+
+                                        // The directory index 0 is defined to correspond to the compilation unit directory.
+                                        if file.directory_index() != 0 {
+                                            if let Some(dir) = file.directory(header) {
+                                                path.push(
+                                                    unit.attr_string(dir)
+                                                        .unwrap()
+                                                        .to_string_lossy()
+                                                        .as_ref(),
+                                                );
+                                            }
                                         }
-                                    }
 
-                                    path.push(
-                                        unit.attr_string(file.path_name())
-                                            .unwrap()
-                                            .to_string_lossy()
-                                            .as_ref(),
-                                    );
+                                        path.push(file_name.as_ref());
+
+                                        path_idx = Some(map.add_file(path));
+
+                                        file_entry_map.insert(
+                                            (file.directory_index(), file_name.into_owned()),
+                                            path_idx.unwrap(),
+                                        );
+                                    }
                                 }
+                                if path_idx.is_none() && verbose {
+                                    eprintln!("ERROR: Unable to resolved source file path");
+                                    continue;
+                                }
+                                let path_idx = path_idx.unwrap();
 
                                 // Determine line/column. DWARF line/column is never 0, so we use that
                                 // but other applications may want to display this differently.
@@ -225,8 +321,6 @@ pub fn read_dbg_info(
                                     gimli::ColumnType::Column(column) => column.get(),
                                 };
                                 let text_offset = row.address() as usize + m.span.offset();
-                                //eprintln!("{:x}", text_offset);
-                                //panic!();
 
                                 if verbose {
                                     eprintln!(
@@ -235,13 +329,14 @@ pub fn read_dbg_info(
                                         str::from_utf8(
                                             &text.as_bytes()[text_offset..text_offset + 10]
                                         ),
-                                        path.display(),
+                                        map.file_map[path_idx].display(),
                                         line,
                                         column
                                     );
                                 }
 
-                                let path_idx = map.add_file(path);
+                                //eprintln!("ACTUAL PATH IDX: {}", path_idx);
+                                //eprintln!("LINE NUMBER DWARF PATH IDX: {}", program.header().)
 
                                 let info = DebugLineInfo {
                                     address: row.address(),
@@ -251,6 +346,71 @@ pub fn read_dbg_info(
                                     code_module_idx,
                                 };
                                 map.add_line(info);
+                            }
+                        }
+
+                        // Add func refs to sdi
+                        'func: for func in funcs {
+                            let (dwarf_file, mut func) = func;
+                            // map func addrs to actual lines
+                            // maybe we should make the functions before this processing a different struct?
+                            
+
+                            // map dwarf file index
+                            let file = program.header().file(dwarf_file).unwrap();
+                            let file_name = unit
+                                .attr_string(file.path_name())
+                                .unwrap()
+                                .to_string_lossy()
+                                .into_owned();
+
+                            if let Some(path_idx) =
+                                file_entry_map.get(&(file.directory_index(), file_name))
+                            {
+                                let dlis_in_mod = map
+                                .lines
+                                .iter()
+                                .filter(|dli| dli.code_module_idx == code_module_idx && dli.path_idx == *path_idx);
+
+
+                            let start_line = dlis_in_mod
+                                .clone()
+                                .filter(|dli| dli.address <= func.0)
+                                .max_by(|dli1, dli2| dli1.address.cmp(&dli2.address));
+
+                            if start_line.is_none() {
+                                eprintln!("ERROR: no valid dli found for function definition");
+                                continue 'func;
+                            }
+                                
+                            let start_line = start_line.unwrap().line;
+                            let end_line = func.1.map(|addr| {
+                                dlis_in_mod
+                                    .filter(|dli| dli.address <= addr)
+                                    .max_by(|dli1, dli2| dli1.line.cmp(&dli2.line)) // figure out why this gives errors
+                                    .unwrap()
+                                    .line
+                            });
+                            println!("Mapped to {}, {:?}", start_line, end_line);
+                            func = (start_line, end_line, func.2);
+
+
+                                // search the SDIs
+                                for sdi in &mut map.sdi_vec {
+                                    if sdi.path_idx == *path_idx {
+                                        sdi.functions.push(func);
+                                        continue 'func;
+                                    }
+                                }
+                                // if we're here, we need to make a new sdi
+                                let sdi = SourceDebugInfo {
+                                    path_idx: *path_idx,
+                                    functions: vec![func],
+                                    branches: Vec::new(),
+                                };
+                                map.sdi_vec.push(sdi);
+                            } else {
+                                eprintln!("SDI FILE HAD NO ENTRY IN FILE MAP!")
                             }
                         }
                     }
@@ -275,3 +435,6 @@ pub fn find_code_offsets(input: &[u8]) -> Result<Vec<usize>, BinaryReaderError> 
     }
     Ok(code_offsets)
 }
+
+type FuncDef = (u64, Option<u64>, String); // line num of func start, func end, and name
+type BranchDef = (u64, bool, u64, u64); // line num, is exception, block idx, branch idx,

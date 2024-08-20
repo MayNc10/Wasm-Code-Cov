@@ -7,6 +7,7 @@ edition = "2021"
 clap = { workspace = true }
 colored = { workspace = true }
 runner = {path = "../runner"}
+serde_json = { workspace = true }
 wasmparser = { workspace = true }
 wasmprinter = "0.215.0"
 wast = { workspace = true }

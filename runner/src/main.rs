@@ -27,6 +27,9 @@ struct Cli {
     #[arg(short, long, value_name = "OUTPUT_FILES")]
     output: Option<Vec<PathBuf>>,
 
+    #[arg(short, long, value_name = "TRACEFILE_PATH")]
+    tracefile_path: Option<PathBuf>,
+
     verbose: bool,
 }
 
@@ -65,6 +68,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         gcov_files,
         cli.files_to_output,
         cli.output,
+        cli.tracefile_path,
         cli.verbose,
     )
 }

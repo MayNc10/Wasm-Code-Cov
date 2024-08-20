@@ -87,6 +87,12 @@ impl GCovFile {
             .0
             .increment(column_idx)
     }
+    pub fn clone_src_file(&self) -> Arc<PathBuf> {
+        self.src_file.clone()
+    }
+    pub fn get_counters_for_line(&self, line: LineIndex) -> Option<u64> {
+        self.counters.get(&line).map(|(l, _)| l.total_counters())
+    }
 }
 
 // Will allow us to write into an output file

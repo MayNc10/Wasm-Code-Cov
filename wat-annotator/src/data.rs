@@ -1,6 +1,13 @@
-use std::{collections::HashMap, ops::Deref, path, sync::Arc};
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    path::{self, PathBuf},
+    sync::Arc,
+};
 
 use serde::{Deserialize, Serialize};
+
+use crate::debug::SourceDebugInfo;
 
 /// A trait to consildate functions across the two types of DebugData structs
 pub trait DebugData {
@@ -8,6 +15,7 @@ pub trait DebugData {
     fn file_map_idx(&self, idx: usize) -> Option<&dyn Deref<Target = path::Path>>;
     /// Returns a hashmap mapping file map indices to lists of lines and numbers of counters
     fn blocks_per_line(&self) -> &HashMap<usize, Vec<(u64, u64)>>;
+    fn sdi_vec(&self) -> &Vec<SourceDebugInfo>;
 
     /// Display the counters on each line for every file in the map
     fn print_idxs_for_file(&self) {
@@ -24,6 +32,15 @@ pub trait DebugData {
             }
         }
     }
+    fn get_sdi_from_file(&self, file: &PathBuf) -> Option<&SourceDebugInfo> {
+        self.sdi_vec()
+            .iter()
+            .filter(|sdi| {
+                self.file_map_idx(sdi.path_idx)
+                    .is_some_and(|f| &**f == file.as_path())
+            })
+            .next()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -33,6 +50,7 @@ pub struct DebugDataOwned {
     pub file_map: Vec<path::PathBuf>,
     /// Contains the number of blocks in a specific line of code
     pub blocks_per_line: HashMap<usize, Vec<(u64, u64)>>, // maps file indxs to lines and number of counters
+    pub sdi_vec: Vec<SourceDebugInfo>, // A list of source debug information structs
 }
 
 impl DebugData for DebugDataOwned {
@@ -47,6 +65,10 @@ impl DebugData for DebugDataOwned {
     fn blocks_per_line(&self) -> &HashMap<usize, Vec<(u64, u64)>> {
         &self.blocks_per_line
     }
+
+    fn sdi_vec(&self) -> &Vec<SourceDebugInfo> {
+        &self.sdi_vec
+    }
 }
 
 /// Like `DebugData`, but with an `Arc` wrapper around the paths to prevent excessive cloning
@@ -55,6 +77,7 @@ pub struct DebugDataArc {
     pub file_map: Vec<Arc<path::PathBuf>>,
     /// Contains the number of blocks in a specific line of code
     pub blocks_per_line: HashMap<usize, Vec<(u64, u64)>>, // maps file indxs to lines and number of counters
+    pub sdi_vec: Vec<SourceDebugInfo>, // A list of source debug information structs
 }
 
 impl DebugData for DebugDataArc {
@@ -69,6 +92,9 @@ impl DebugData for DebugDataArc {
     fn blocks_per_line(&self) -> &HashMap<usize, Vec<(u64, u64)>> {
         &self.blocks_per_line
     }
+    fn sdi_vec(&self) -> &Vec<SourceDebugInfo> {
+        &self.sdi_vec
+    }
 }
 
 impl From<DebugDataOwned> for DebugDataArc {
@@ -76,6 +102,7 @@ impl From<DebugDataOwned> for DebugDataArc {
         DebugDataArc {
             file_map: value.file_map.into_iter().map(|p| Arc::new(p)).collect(),
             blocks_per_line: value.blocks_per_line,
+            sdi_vec: value.sdi_vec,
         }
     }
 }

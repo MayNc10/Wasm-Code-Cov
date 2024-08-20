@@ -36,6 +36,9 @@ struct Cli {
 
     #[arg(short, long, value_name = "WORLD_NAME")]
     world: Option<String>,
+
+    #[arg(short, long, value_name = "DUMP_DATA")]
+    dump_data: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -64,6 +67,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (output_wat, data) =
         wat_annotator::modify_wasm(None, Some(wat), Some(cli.path), cli.verbose)?;
 
+    if cli.dump_data {
+        // output data to build folder
+        let path = cli.build_dir.join("data.json");
+        fs::write(path, serde_json::to_string_pretty(&data)?)?;
+    }
     let buf = ParseBuffer::new(&output_wat)?;
     let mut output_wat = parse::<Wat>(&buf)?;
     if cli.verbose {
@@ -85,6 +93,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect::<Vec<_>>();
 
+    let tracefile_path = cli.build_dir.join("wcov.info");
+
     if cli.verbose {
         println!("{} Calling Runner", "WCOV".red());
     }
@@ -94,6 +104,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(HashMap::new()),
         Some(cli.output_files),
         Some(output_paths),
+        Some(tracefile_path),
         cli.verbose,
     )
 }

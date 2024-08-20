@@ -252,37 +252,35 @@ pub fn add_func_calls<'a>(
                                     )
                                     .unwrap();
 
-                                    let hexes = binary_offset_re.captures_iter(txt_line).map(|c| {
-                                        let m = c.name("hex").unwrap();
-                                        let bin_offset =
-                                            u64::from_str_radix(m.as_str(), 16).unwrap();
-                                        let m_whole = c.name("whole").unwrap();
-                                        let txt_offset = m_whole.end();
-                                        (bin_offset, txt_offset)
-                                    });
+                                    let hexes = binary_offset_re
+                                        .captures_iter(txt_line)
+                                        .map(|c| {
+                                            let m = c.name("hex").unwrap();
+                                            let bin_offset =
+                                                u64::from_str_radix(m.as_str(), 16).unwrap();
+                                            let m_whole = c.name("whole").unwrap();
+                                            let txt_offset = m_whole.end();
+                                            (bin_offset, txt_offset)
+                                        })
+                                        .collect::<Vec<_>>();
 
+                                    // If the byte ranges "bound" or "surround" the function address, we know this is the function
                                     let text_offset = if func_at.is_some()
                                         && hexes
+                                            .iter()
                                             .filter(|(off, _)| {
                                                 *off >= func_at.unwrap().3 + mod_offset as u64
                                             })
                                             .count()
                                             > 0
                                     {
-                                        println!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", spans.first().unwrap().offset() , func.span.offset(), func_at.unwrap().2, line);
+                                        println!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", 
+                                            spans.first().unwrap().offset() , func.span.offset(), func_at.unwrap().2, line);
 
                                         spans.first().unwrap().offset()
                                     } else {
-                                        let Some(text_offset) = binary_offset_re
-                                            .captures_iter(txt_line)
-                                            .map(|c| {
-                                                let m = c.name("hex").unwrap();
-                                                let bin_offset =
-                                                    u64::from_str_radix(m.as_str(), 16).unwrap();
-                                                let m_whole = c.name("whole").unwrap();
-                                                let txt_offset = m_whole.end();
-                                                (bin_offset, txt_offset)
-                                            })
+                                        let Some(text_offset) = hexes
+                                            .iter()
                                             .filter(|(x, _)| *x == true_bin_addr)
                                             .min_by(|(b1, _), (b2, _)| b1.cmp(b2))
                                         else {

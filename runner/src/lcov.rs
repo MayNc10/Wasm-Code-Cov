@@ -1,3 +1,5 @@
+//! A module containing structs to output LCov formatted coverage info
+
 use std::{fmt::Display, path::PathBuf, sync::Arc};
 
 use wat_annotator::debug::SourceDebugInfo;
@@ -5,12 +7,14 @@ use wat_annotator::debug::SourceDebugInfo;
 use crate::gcov::GCovFile;
 
 type FuncDef = (u64, Option<u64>, String); // line num of func start, func end, and name
+#[allow(dead_code)]
 type BranchDef = (u64, bool, u64, u64); // line num, is exception, block idx, branch idx,
 type FNDA = (u64, usize); // execution count, func index
 type BRDA = (u64, bool, u64, u64, u64); // line num, is an exception, block idx, branch idx, times taken
                                         // What lines count as instrumented? idk we should figure that out
 type DA = (u64, u64, Option</*should be an md5 */ u64>); // line num, exec count, hash
 
+/// A struct represention a source file that is part of an LCov tracefile
 pub struct SourceFile {
     path: Arc<PathBuf>,
     version: Option<u64>,
@@ -21,6 +25,7 @@ pub struct SourceFile {
 }
 
 impl SourceFile {
+    /// Create a new `SourceFile` from a Gcovfile containing counter information and a SourceDebugInfo struct
     pub fn new(counter_log: &GCovFile, sdi: &SourceDebugInfo) -> SourceFile {
         let path = counter_log.clone_src_file();
         let version = None;
@@ -127,12 +132,14 @@ impl Display for SourceFile {
     }
 }
 
+/// A struct representing an Lcov tracefile, with file extension  ".info"
 pub struct TraceFile {
     test_name: Option<String>,
     files: Vec<SourceFile>,
 }
 
 impl TraceFile {
+    /// Create a new tracefile from an optional name and a list of sourcefiles
     pub fn new(name: Option<&str>, files: Vec<SourceFile>) -> TraceFile {
         TraceFile {
             test_name: name.map(String::from),

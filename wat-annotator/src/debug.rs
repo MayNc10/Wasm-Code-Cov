@@ -1,12 +1,8 @@
 use core::str;
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::path::{self, Path, PathBuf};
-use std::rc::Rc;
-use std::sync::Arc;
+use std::path::{self, PathBuf};
 
-use gimli::LineProgram;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use wasmparser::{BinaryReaderError, Parser, Payload::*};
@@ -33,10 +29,12 @@ pub struct DebugLineInfo {
 }
 
 /// This struct contains overall debugging information for a Webassembly file
+// TODO: Rename!
 pub struct WatLineMapper {
     code_offsets: Vec<usize>,
     lines: Vec<DebugLineInfo>,
     file_map: Vec<path::PathBuf>,
+    /// A list of `SourceDebugInfo` structs 
     pub sdi_vec: Vec<SourceDebugInfo>,
 }
 
@@ -139,9 +137,13 @@ impl WatLineMapper {
 }
 
 #[derive(Serialize, Deserialize)]
+/// A struct represeting dbug information about a source file
 pub struct SourceDebugInfo {
+    /// The index into the file table correponding to the source file this struct represents
     pub path_idx: usize,
+    /// A list of functions in the source code
     pub functions: Vec<FuncDef>,
+    /// A list of branches in the source code
     pub branches: Vec<BranchDef>,
 }
 

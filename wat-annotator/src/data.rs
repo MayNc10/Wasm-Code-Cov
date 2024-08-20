@@ -15,6 +15,7 @@ pub trait DebugData {
     fn file_map_idx(&self, idx: usize) -> Option<&dyn Deref<Target = path::Path>>;
     /// Returns a hashmap mapping file map indices to lists of lines and numbers of counters
     fn blocks_per_line(&self) -> &HashMap<usize, Vec<(u64, u64)>>;
+    /// Access the vector of `SourceDebugInfo` structs in this debug data struct
     fn sdi_vec(&self) -> &Vec<SourceDebugInfo>;
 
     /// Display the counters on each line for every file in the map
@@ -32,6 +33,7 @@ pub trait DebugData {
             }
         }
     }
+    /// Get the SDI matching a file path, if one exists
     fn get_sdi_from_file(&self, file: &PathBuf) -> Option<&SourceDebugInfo> {
         self.sdi_vec()
             .iter()
@@ -50,6 +52,7 @@ pub struct DebugDataOwned {
     pub file_map: Vec<path::PathBuf>,
     /// Contains the number of blocks in a specific line of code
     pub blocks_per_line: HashMap<usize, Vec<(u64, u64)>>, // maps file indxs to lines and number of counters
+    /// A list of source debug information structs
     pub sdi_vec: Vec<SourceDebugInfo>, // A list of source debug information structs
 }
 
@@ -77,6 +80,7 @@ pub struct DebugDataArc {
     pub file_map: Vec<Arc<path::PathBuf>>,
     /// Contains the number of blocks in a specific line of code
     pub blocks_per_line: HashMap<usize, Vec<(u64, u64)>>, // maps file indxs to lines and number of counters
+    /// A list of source debug information structs
     pub sdi_vec: Vec<SourceDebugInfo>, // A list of source debug information structs
 }
 

@@ -87,9 +87,11 @@ impl GCovFile {
             .0
             .increment(column_idx)
     }
+    /// Clone the source file this struct represents, using an `Arc`
     pub fn clone_src_file(&self) -> Arc<PathBuf> {
         self.src_file.clone()
     }
+    /// Get the total number of counters for a file, or zero if there isn't any code at that line
     pub fn get_counters_for_line(&self, line: LineIndex) -> Option<u64> {
         self.counters.get(&line).map(|(l, _)| l.total_counters())
     }

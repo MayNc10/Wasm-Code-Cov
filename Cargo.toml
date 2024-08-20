@@ -1,5 +1,5 @@
 [workspace]
-members = ["wat-annotator", "example-component", "runner", "wcov"]
+members = ["wat-annotator", "runner", "wcov"]
 resolver = "1"
 
 [workspace.dependencies]

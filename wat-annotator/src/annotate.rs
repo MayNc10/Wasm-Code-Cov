@@ -1,6 +1,5 @@
 use core::str;
 use std::borrow::Cow;
-use std::iter::Filter;
 
 use regex::Regex;
 use wast::core::{ExportKind, Func, Instruction, ModuleField};
@@ -224,20 +223,28 @@ pub fn add_func_calls<'a>(
                                 .filter(|dli| dli.code_module_idx == inline_mod_idx);
                             if let Some(mod_offset) = map.get_code_addr(inline_mod_idx) {
                                 for line in lines {
-                                    
-                                    if !sdi_iter.as_ref().is_some_and(|sdi_iter: &Vec<_>| sdi_iter.iter().next().is_some_and(|n: &&SourceDebugInfo| n.path_idx == line.path_idx)) {
-                                        sdi_iter = Some(map
-                                        .sdi_vec
-                                        .iter().filter(|sdi| sdi.path_idx == line.path_idx ).collect());
-                                    } 
+                                    if !sdi_iter.as_ref().is_some_and(|sdi_iter: &Vec<_>| {
+                                        sdi_iter.iter().next().is_some_and(
+                                            |n: &&SourceDebugInfo| n.path_idx == line.path_idx,
+                                        )
+                                    }) {
+                                        sdi_iter = Some(
+                                            map.sdi_vec
+                                                .iter()
+                                                .filter(|sdi| sdi.path_idx == line.path_idx)
+                                                .collect(),
+                                        );
+                                    }
 
-                                    
-                                    let func_at = 
-                                        sdi_iter.as_ref().unwrap().iter().filter_map(|sdi| {
+                                    let func_at = sdi_iter
+                                        .as_ref()
+                                        .unwrap()
+                                        .iter()
+                                        .filter_map(|sdi| {
                                             sdi.functions
-                                                    .iter()
-                                                    .filter(|sdi_func| line.address == sdi_func.3)
-                                                    .next()
+                                                .iter()
+                                                .filter(|sdi_func| line.address == sdi_func.3)
+                                                .next()
                                         })
                                         .next();
 
@@ -255,29 +262,27 @@ pub fn add_func_calls<'a>(
                                     )
                                     .unwrap();
 
-                                    let hex_iter = binary_offset_re
-                                    .captures_iter(txt_line)
-                                    .map(|c| {
-                                        let m = c.name("hex").unwrap();
-                                        let bin_offset =
-                                            u64::from_str_radix(m.as_str(), 16).unwrap();
-                                        let m_whole = c.name("whole").unwrap();
-                                        let txt_offset = m_whole.end();
-                                        (bin_offset, txt_offset)
-                                    });
+                                    let hex_iter =
+                                        binary_offset_re.captures_iter(txt_line).map(|c| {
+                                            let m = c.name("hex").unwrap();
+                                            let bin_offset =
+                                                u64::from_str_radix(m.as_str(), 16).unwrap();
+                                            let m_whole = c.name("whole").unwrap();
+                                            let txt_offset = m_whole.end();
+                                            (bin_offset, txt_offset)
+                                        });
 
                                     let text_offset = if func_at.is_some() {
-                                        let hexes = 
-                                        hex_iter.collect::<Vec<_>>();
+                                        let hexes = hex_iter.collect::<Vec<_>>();
 
                                         // If the byte ranges "bound" or "surround" the function address, we know this is the function
                                         if hexes
-                                                .iter()
-                                                .filter(|(off, _)| {
-                                                    *off >= func_at.unwrap().3 + mod_offset as u64
-                                                })
-                                                .count()
-                                                > 0
+                                            .iter()
+                                            .filter(|(off, _)| {
+                                                *off >= func_at.unwrap().3 + mod_offset as u64
+                                            })
+                                            .count()
+                                            > 0
                                         {
                                             if verbose {
                                                 println!("USING FUNC START, spans: {}, func: {}, name: {}, dli: {:?}", 
@@ -296,17 +301,14 @@ pub fn add_func_calls<'a>(
                                             text_offset.1 + func.span.offset()
                                         }
                                     } else {
-                                        let Some(text_offset) = hexes
-                                                .iter()
-                                                .filter(|(x, _)| *x == true_bin_addr)
-                                                .min_by(|(b1, _), (b2, _)| b1.cmp(b2))
-                                            else {
-                                                continue;
-                                            };
-                                            text_offset.1 + func.span.offset()
+                                        let Some(text_offset) = hex_iter
+                                            .filter(|(x, _)| *x == true_bin_addr)
+                                            .min_by(|(b1, _), (b2, _)| b1.cmp(b2))
+                                        else {
+                                            continue;
+                                        };
+                                        text_offset.1 + func.span.offset()
                                     };
-
-                                    
 
                                     let msg = format!(
                                         "i32.const {} i32.const {} i32.const {} i32.const {} i32.const {} call ${}\n",

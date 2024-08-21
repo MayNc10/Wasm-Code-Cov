@@ -1,5 +1,5 @@
 # wcov
-`wcov` is a tool for generating code coverage reports from Wasm components and modules. This output comes in the form of gcov .gcda/.gcno files or lcov .info files, which can be further processed by tools like `genhtml` for easier viewing. 
+`wcov` is a tool for generating code coverage reports from Wasm components and modules. This output comes in the form of gcov .gcda/.gcno files or lcov .info files, which can be further processed by tools like `genhtml` for easier viewing. Because `wcov` modifies already built Wasm files, no extra compilation libraries or tools are needed (in fact, you don't even need access to the source files to run it). 
 ## Installation
 `wcov` can be installed with Cargo, the Rust package manager/general utility, by running 
 `cargo install --git https://github.com/MayNc10/Wasm-Code-Cov wcov`
